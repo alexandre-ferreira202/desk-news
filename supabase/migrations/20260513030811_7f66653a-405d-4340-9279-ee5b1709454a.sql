@@ -1,0 +1,1 @@
+ALTER TABLE public.espelho_blocos ADD COLUMN IF NOT EXISTS programa text NOT NULL DEFAULT 'Jornal da Manhã';
