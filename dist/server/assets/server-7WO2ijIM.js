@@ -73,7 +73,7 @@ function getResponse() {
 }
 var HEADERS = { TSS_SHELL: "X-TSS_SHELL" };
 async function getStartManifest(matchedRoutes) {
-  const { tsrStartManifest } = await import("./_tanstack-start-manifest_v-tv8eQRa7.js");
+  const { tsrStartManifest } = await import("./_tanstack-start-manifest_v-DvfvZPiJ.js");
   const startManifest = tsrStartManifest();
   let routes = startManifest.routes;
   routes[rootRouteId];
@@ -95,7 +95,7 @@ async function getStartManifest(matchedRoutes) {
 const manifest = {
   "5b84dd6bae09f625244fad5fee7756a6109e2c06693485ab5f78995fc67389e4": {
     functionName: "fetchPortais_createServerFn_handler",
-    importer: () => import("./portais.functions-DnILYkQt.js")
+    importer: () => import("./portais.functions-DhqmCXuo.js")
   }
 };
 async function getServerFnById(id, access) {
@@ -1336,8 +1336,8 @@ var getBaseManifest = getProdBaseManifest;
 var createEarlyHintsForRequest = createEarlyHintsCollector;
 async function loadEntries() {
   const [routerEntry, startEntry, pluginAdapters] = await Promise.all([
-    import("./router-B7HjrWyS.js"),
-    import("./start-DK03AAqt.js"),
+    import("./router-CO8YoL_E.js"),
+    import("./start-Djrnr1i2.js"),
     import("./empty-plugin-adapters-BFgPZ6_d.js")
   ]);
   return {

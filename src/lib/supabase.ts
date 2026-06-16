@@ -10,6 +10,26 @@ const noopChannel: any = {
   unsubscribe: () => noopChannel,
 };
 
+const noopQuery: any = new Proxy({}, {
+  get: (_target, prop) => {
+    if (prop === 'then') return undefined;
+    if (prop === Symbol.iterator) return undefined;
+    return (..._args: any[]) => noopQuery;
+  }
+});
+
+const noopQueryWithPromise: any = new Proxy(
+  Promise.resolve({ data: null, error: null }),
+  {
+    get: (target, prop) => {
+      if (prop === 'then' || prop === 'catch' || prop === 'finally') {
+        return target[prop as keyof typeof target].bind(target);
+      }
+      return (..._args: any[]) => noopQueryWithPromise;
+    }
+  }
+);
+
 function createSupabaseClient() {
   if (!supabaseUrl || !supabaseAnonKey) {
     return {
@@ -20,14 +40,7 @@ function createSupabaseClient() {
         }),
         signOut: () => Promise.resolve({ error: null }),
       },
-      from: (_table: string) => ({
-        select: () => ({
-          eq: () => ({
-            single: () => Promise.resolve({ data: null, error: null }),
-            then: () => Promise.resolve({ data: null, error: null }),
-          }),
-        }),
-      }),
+      from: (_table: string) => noopQueryWithPromise,
       channel: (_name: string) => noopChannel,
       removeChannel: () => {},
     } as any;

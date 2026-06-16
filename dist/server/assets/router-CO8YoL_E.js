@@ -14,7 +14,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { getDefaultClassNames, DayPicker } from "react-day-picker";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
-import { T as TSS_SERVER_FUNCTION, g as getServerFnById, c as createServerFn } from "./server-BDJWADlf.js";
+import { T as TSS_SERVER_FUNCTION, g as getServerFnById, c as createServerFn } from "./server-7WO2ijIM.js";
 import { ResponsiveContainer, BarChart, CartesianGrid, XAxis, YAxis, Tooltip, Bar, PieChart, Pie, Cell } from "recharts";
 import { useSensors, useSensor, MouseSensor, TouchSensor, KeyboardSensor, DndContext, closestCorners } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates, SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
@@ -272,6 +272,24 @@ function RootComponent() {
 }
 const supabaseUrl = "https://zxopxmcwoakdvxwvmufy.supabase.co";
 const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4b3B4bWN3b2FrZHZ4d3ZtdWZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzMzY5MDYsImV4cCI6MjA5MzkxMjkwNn0.N9E1sg2GF_Q17IvxMkCWAPEq05697lvHp7sUDFiYEs0";
+const noopQuery = new Proxy({}, {
+  get: (_target, prop) => {
+    if (prop === "then") return void 0;
+    if (prop === Symbol.iterator) return void 0;
+    return (..._args) => noopQuery;
+  }
+});
+const noopQueryWithPromise = new Proxy(
+  Promise.resolve({ data: null, error: null }),
+  {
+    get: (target, prop) => {
+      if (prop === "then" || prop === "catch" || prop === "finally") {
+        return target[prop].bind(target);
+      }
+      return (..._args) => noopQueryWithPromise;
+    }
+  }
+);
 function createSupabaseClient() {
   return createClient(supabaseUrl, supabaseAnonKey, {
     realtime: { params: { eventsPerSecond: 10 } }
