@@ -3,5 +3,5 @@
   "name": "desknews",
   "compatibility_date": "2026-06-16",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "src/server.ts"
+  "main": "dist/server/server.js"
 }
