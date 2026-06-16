@@ -201,7 +201,7 @@
   }
 }
 
-.animate-slide-up {
+.animate-slide-up { 
   animation: slide-up 300ms ease-out;
 }
 
