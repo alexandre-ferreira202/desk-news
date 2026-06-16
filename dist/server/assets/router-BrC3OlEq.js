@@ -14,7 +14,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { getDefaultClassNames, DayPicker } from "react-day-picker";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
-import { T as TSS_SERVER_FUNCTION, g as getServerFnById, c as createServerFn } from "./server-7WO2ijIM.js";
+import { T as TSS_SERVER_FUNCTION, g as getServerFnById, c as createServerFn } from "./server-BqZ-7n4X.js";
 import { ResponsiveContainer, BarChart, CartesianGrid, XAxis, YAxis, Tooltip, Bar, PieChart, Pie, Cell } from "recharts";
 import { useSensors, useSensor, MouseSensor, TouchSensor, KeyboardSensor, DndContext, closestCorners } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates, SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
@@ -6493,7 +6493,8 @@ function LoginPage() {
 }
 const Route$3 = createFileRoute("/espelho")({
   component: () => /* @__PURE__ */ jsx(EspelhoPage, {}),
-  head: () => ({ meta: [{ title: "Espelho — DeskNews" }] })
+  head: () => ({ meta: [{ title: "Espelho — DeskNews" }] }),
+  ssr: false
 });
 const PROGRAMAS = ["Jornal da Manhã", "Edição Meio-Dia", "Jornal da Noite"];
 const FORMATOS = [

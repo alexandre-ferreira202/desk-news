@@ -37,6 +37,7 @@ import { CSS } from "@dnd-kit/utilities";
 export const Route = createFileRoute("/espelho")({
   component: () => <EspelhoPage />,
   head: () => ({ meta: [{ title: "Espelho — DeskNews" }] }),
+  ssr: false,
 });
 
 type ItemStatus = "pendente" | "pronto" | "no_ar" | "exibido" | "cortado";
