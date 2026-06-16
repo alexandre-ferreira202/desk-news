@@ -5,8 +5,6 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 function createSupabaseClient() {
   if (!supabaseUrl || !supabaseAnonKey) {
-    // Stub seguro para SSR — retorna as estruturas exatas que o Supabase Auth espera,
-    // evitando crashes ao desestruturar `.data.session` e `.data.subscription`.
     return {
       auth: {
         getSession: () =>
@@ -24,10 +22,21 @@ function createSupabaseClient() {
           }),
         }),
       }),
+      channel: (_name: string) => ({
+        on: () => ({ on: () => ({ subscribe: () => {} }) }),
+        subscribe: () => {},
+        send: () => {},
+      }),
+      removeChannel: () => {},
     } as any;
   }
-
-  return createClient(supabaseUrl, supabaseAnonKey);
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    realtime: {
+      params: {
+        eventsPerSecond: 10,
+      },
+    },
+  });
 }
 
 export const supabase = createSupabaseClient();

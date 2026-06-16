@@ -14,7 +14,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { getDefaultClassNames, DayPicker } from "react-day-picker";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
-import { T as TSS_SERVER_FUNCTION, g as getServerFnById, c as createServerFn } from "./server-CSDeMawx.js";
+import { T as TSS_SERVER_FUNCTION, g as getServerFnById, c as createServerFn } from "./server-DHJv87Dn.js";
 import { ResponsiveContainer, BarChart, CartesianGrid, XAxis, YAxis, Tooltip, Bar, PieChart, Pie, Cell } from "recharts";
 import { useSensors, useSensor, MouseSensor, TouchSensor, KeyboardSensor, DndContext, closestCorners } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates, SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
@@ -273,7 +273,13 @@ function RootComponent() {
 const supabaseUrl = "https://zxopxmcwoakdvxwvmufy.supabase.co";
 const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4b3B4bWN3b2FrZHZ4d3ZtdWZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzMzY5MDYsImV4cCI6MjA5MzkxMjkwNn0.N9E1sg2GF_Q17IvxMkCWAPEq05697lvHp7sUDFiYEs0";
 function createSupabaseClient() {
-  return createClient(supabaseUrl, supabaseAnonKey);
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    realtime: {
+      params: {
+        eventsPerSecond: 10
+      }
+    }
+  });
 }
 const supabase = createSupabaseClient();
 function cn(...inputs) {
