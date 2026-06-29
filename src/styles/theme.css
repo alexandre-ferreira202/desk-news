@@ -1,83 +1,83 @@
-/* DeskNews Theme Configuration */
+/* DeskNews Theme Configuration - Master Control TV Dark Extremo */
 
 :root,
 [data-theme="dark"] {
   /* Backgrounds */
-  --bg-primary: #05070a;
-  --bg-secondary: #0f1419;
-  --bg-tertiary: #1a1f2e;
-  --bg-overlay: #1f2433;
-  --bg-overlay-2: #2a3040;
+  --bg-primary: #09090b;
+  --bg-secondary: #141416;
+  --bg-tertiary: #1a1a1e;
+  --bg-overlay: #0f0f12;
+  --bg-overlay-2: #1a1a21;
 
   /* Text */
-  --text-primary: #f5f5f5;
-  --text-secondary: #d1d5db;
-  --text-tertiary: #9ca3af;
-  --text-quaternary: #6b7280;
-  --text-muted: #4b5563;
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #94a3b8;
+  --text-quaternary: #64748b;
+  --text-muted: #475569;
 
   /* Borders */
-  --border-subtle: #1f2433;
-  --border-light: #2a3040;
-  --border-medium: #3f4a5e;
+  --border-subtle: rgba(34, 197, 94, 0.08);
+  --border-light: rgba(34, 197, 94, 0.15);
+  --border-medium: rgba(34, 197, 94, 0.25);
 
   /* Accent */
-  --accent-primary: #3b82f6;
-  --accent-secondary: #1e40af;
-  --accent-tertiary: #1e3a8a;
+  --accent-primary: #22c55e;
+  --accent-secondary: #16a34a;
+  --accent-tertiary: #15803d;
 
   /* Status */
-  --status-success: #10b981;
+  --status-success: #22c55e;
   --status-warning: #f59e0b;
   --status-error: #ef4444;
-  --status-info: #06b6d4;
+  --status-info: #3b82f6;
 
   /* Glass */
-  --glass-bg: rgba(15, 20, 25, 0.8);
-  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-bg: rgba(9, 9, 11, 0.95);
+  --glass-border: rgba(34, 197, 94, 0.15);
 
   /* Shadows */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6);
-  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.7);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.8);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.9);
+  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 1);
 }
 
 [data-theme="light"] {
   /* Backgrounds */
-  --bg-primary: #f9fafb;
-  --bg-secondary: #f3f4f6;
-  --bg-tertiary: #e5e7eb;
-  --bg-overlay: #e5e7eb;
-  --bg-overlay-2: #d1d5db;
+  --bg-primary: #ffffff;
+  --bg-secondary: #fafafa;
+  --bg-tertiary: #f5f5f5;
+  --bg-overlay: #f0f0f0;
+  --bg-overlay-2: #e5e5e5;
 
   /* Text */
-  --text-primary: #1f2937;
-  --text-secondary: #4b5563;
-  --text-tertiary: #6b7280;
-  --text-quaternary: #9ca3af;
-  --text-muted: #d1d5db;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-tertiary: #64748b;
+  --text-quaternary: #94a3b8;
+  --text-muted: #cbd5e1;
 
   /* Borders */
-  --border-subtle: #f0f0f0;
-  --border-light: #e5e7eb;
-  --border-medium: #d1d5db;
+  --border-subtle: rgba(34, 197, 94, 0.1);
+  --border-light: rgba(34, 197, 94, 0.2);
+  --border-medium: rgba(34, 197, 94, 0.3);
 
   /* Accent */
-  --accent-primary: #2563eb;
-  --accent-secondary: #1d4ed8;
-  --accent-tertiary: #1e40af;
+  --accent-primary: #16a34a;
+  --accent-secondary: #15803d;
+  --accent-tertiary: #166534;
 
   /* Status */
-  --status-success: #059669;
+  --status-success: #16a34a;
   --status-warning: #d97706;
   --status-error: #dc2626;
   --status-info: #0891b2;
 
   /* Glass */
-  --glass-bg: rgba(255, 255, 255, 0.8);
-  --glass-border: rgba(0, 0, 0, 0.1);
+  --glass-bg: rgba(255, 255, 255, 0.9);
+  --glass-border: rgba(34, 197, 94, 0.2);
 
   /* Shadows */
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
@@ -91,27 +91,29 @@
 .text-display-xl {
   font-size: 3rem;
   line-height: 1.2;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
 .text-display-lg {
   font-size: 2rem;
   line-height: 1.2;
   font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .text-h1 {
   font-size: 1.875rem;
   line-height: 2.25rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-weight: 800;
+  letter-spacing: 0.01em;
 }
 
 .text-h2 {
   font-size: 1.5rem;
   line-height: 2rem;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: 0em;
 }
 
 .text-h3 {
@@ -141,14 +143,14 @@
 .text-caption {
   font-size: 0.75rem;
   line-height: 1rem;
-  font-weight: 400;
+  font-weight: 500;
   letter-spacing: 0.01em;
 }
 
 .text-label {
   font-size: 0.6875rem;
   line-height: 1rem;
-  font-weight: 500;
+  font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -174,19 +176,19 @@
 
 /* Selection */
 ::selection {
-  background: var(--accent-primary);
-  color: white;
+  background: rgba(34, 197, 94, 0.3);
+  color: var(--text-primary);
 }
 
 /* Focus Visible */
 *:focus-visible {
-  outline: 2px solid var(--accent-primary);
+  outline: 2px solid #22c55e;
   outline-offset: 2px;
 }
 
 /* Transitions */
 * {
-  transition: color 200ms, background-color 200ms, border-color 200ms;
+  transition: color 150ms ease-out, background-color 150ms ease-out, border-color 150ms ease-out;
 }
 
 /* Animations */
@@ -216,4 +218,27 @@
 
 .animate-fade-in {
   animation: fade-in 300ms ease-out;
+}
+
+/* Master Control TV - Signal Green utilities */
+.tv-accent {
+  color: #22c55e;
+}
+
+.tv-border {
+  border-color: rgba(34, 197, 94, 0.15);
+}
+
+.tv-bg-dark {
+  background-color: #09090b;
+}
+
+.tv-bg-secondary {
+  background-color: #141416;
+}
+
+.tv-glass {
+  background-color: rgba(9, 9, 11, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(34, 197, 94, 0.15);
 }

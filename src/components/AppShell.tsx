@@ -1,37 +1,42 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
-  LayoutGrid,
-  FileText,
-  MonitorPlay,
-  BarChart3,
-  LogOut,
-  Newspaper,
-  ClipboardList,
-  Menu,
-  X,
-  Sun,
-  Moon,
+  LayoutGrid, FileText, MonitorPlay, BarChart3, LogOut,
+  Newspaper, ClipboardList, Menu, X, Sun, Moon, Film,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { useTheme } from "@/routes/__root";
+import { getSession, signOut } from "@/lib/auth";
+import type { SessionUser } from "@/lib/auth";
 
 const nav = [
-  { to: "/pautas", label: "Pautas", icon: LayoutGrid },
-  { to: "/redacao", label: "Reportagens", icon: FileText },
-  { to: "/espelho", label: "Espelho", icon: MonitorPlay },
-  { to: "/relatorios", label: "Relatorios", icon: ClipboardList },
-  { to: "/metricas", label: "Metricas", icon: BarChart3 },
+  { to: "/pautas",     label: "Pautas",       icon: LayoutGrid },
+  { to: "/redacao",    label: "Reportagens",   icon: FileText },
+  { to: "/espelho",    label: "Espelho",       icon: MonitorPlay },
+  { to: "/relatorios", label: "Relatorios",    icon: ClipboardList },
+  { to: "/metricas",   label: "Metricas",      icon: BarChart3 },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const displayName = "Usuário";
-  const roles: string[] = [];
-  const signOut = async () => {};
+  const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const [open, setOpen] = useState(false);
+  const [user, setUser] = useState<SessionUser | null>(null);
 
-  const handleSignOut = async () => { await signOut(); };
+  useEffect(() => {
+    const session = getSession();
+    // Guard: redireciona para login se não autenticado (exceto na própria /login)
+    if (!session && path !== "/login") {
+      navigate({ to: "/login" });
+      return;
+    }
+    setUser(session);
+  }, [path]);
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate({ to: "/login" });
+  };
 
   const sidebar = (
     <>
@@ -76,16 +81,25 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Link>
           );
         })}
+
+        {/* Editor de Mídia */}
+        <button
+          onClick={() => { window.open("/DeskNews_Media_Editor_12.html", "_blank", "noopener,noreferrer"); setOpen(false); }}
+          className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-body-sm transition-all duration-300 active:scale-[0.98] text-[var(--text-secondary)] hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)] border border-transparent"
+        >
+          <Film className="h-4 w-4" />
+          <span>Edição</span>
+        </button>
       </nav>
 
       <div className="p-3 border-t border-[var(--border-subtle)]">
         <div className="px-2 pb-2 flex items-center justify-between gap-2">
           <div className="min-w-0">
             <div className="text-body-sm font-medium truncate text-[var(--text-primary)]">
-              {displayName ?? "-"}
+              {user?.nome ?? "—"}
             </div>
             <div className="text-label text-[var(--text-tertiary)] truncate">
-              {roles[0]?.replace("_", " ").toUpperCase() ?? "SEM PAPEL"}
+              {user?.papel?.replace("_", " ").toUpperCase() ?? "SEM PAPEL"}
             </div>
           </div>
           <button

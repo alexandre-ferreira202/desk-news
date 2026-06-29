@@ -19,7 +19,7 @@ env.local
 
 .env
 node_modules
-dist
+
 dist-ssr
 .output
 .vinxi

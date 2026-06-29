@@ -30,7 +30,6 @@ function RelatoriosPage() {
   const [relatorios, setRelatorios] = useState<Relatorio[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Filters
   const [dataInicio, setDataInicio] = useState(format(new Date(), "yyyy-MM-01"));
   const [dataFim, setDataFim] = useState(format(new Date(), "yyyy-MM-dd"));
   const [programa, setPrograma] = useState("Todos");
@@ -40,7 +39,7 @@ function RelatoriosPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    let query = supabase.from("relatorios").select("*").order("data", { ascending: false });
+    let query = supabase.from("relatorio").select("*").order("data", { ascending: false });
     
     if (dataInicio) query = query.gte("data", dataInicio);
     if (dataFim) query = query.lte("data", dataFim);
@@ -56,70 +55,69 @@ function RelatoriosPage() {
   useEffect(() => { load(); }, [dataInicio, dataFim, programa, eventoFiltro]);
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 bg-[var(--bg-primary)] text-[var(--text-primary)] font-sans selection:bg-[var(--accent-primary)]/30">
-      {/* Header Premium */}
-      <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] pb-3 shrink-0">
-        <ClipboardList className="h-5 w-5 text-[var(--text-quaternary)]" />
-        <h1 className="text-h1 font-bold tracking-tight bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent">
-          RELATÓRIOS
-        </h1>
-        <span className="text-label text-[var(--text-tertiary)] hidden sm:inline">Gestão · Eventos & Pautas Caídas</span>
+    <div className="min-h-screen p-4 sm:p-6 bg-[#09090b] text-slate-100 font-sans">
+      <div className="flex items-center gap-3 border-b border-[#22c55e]/20 pb-4 mb-8">
+        <div className="flex items-center justify-center h-9 w-9 rounded-md bg-[#22c55e]/10 border border-[#22c55e]/40">
+          <ClipboardList className="h-5 w-5 text-[#22c55e]" />
+        </div>
+        <h1 className="text-2xl font-black tracking-tight font-mono uppercase text-white">Relatórios</h1>
+        <span className="text-xs text-slate-500 hidden sm:inline font-mono uppercase ml-auto">Gestão Editorial</span>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between mb-8">
         <div className="hidden sm:block">
-          <p className="text-body-sm text-[var(--text-tertiary)]">Histórico de ocorrências e controle editorial da redação.</p>
+          <p className="text-xs text-slate-500 font-mono uppercase tracking-widest">Histórico de ocorrências</p>
         </div>
         <Button
           onClick={() => setShowNew(true)}
-          className="inline-flex items-center gap-2 px-8 py-3 rounded-2xl bg-[var(--accent-primary)] text-white text-body-sm font-semibold uppercase tracking-widest shadow-[var(--shadow-lg)] transition-all duration-300 hover:shadow-[var(--shadow-xl)] active:scale-[0.98]"
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-md bg-[#22c55e]/10 border border-[#22c55e] text-white text-xs font-black uppercase tracking-wider transition-all duration-300 hover:bg-[#22c55e]/20 hover:shadow-lg hover:shadow-[#22c55e]/20 active:scale-95 font-mono"
         >
-          <Plus className="h-4 w-4" /> Novo Relatório
+          <Plus className="h-4 w-4" /> Novo
         </Button>
       </div>
 
-      {/* Filters Glassmorphism */}
-      <div className="rounded-3xl border border-[var(--glass-border)] bg-[var(--glass-bg)] backdrop-blur-xl p-6 shadow-[var(--shadow-xl)]">
+      <div className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-6 mb-8 backdrop-blur-lg shadow-2xl">
+        <p className="text-xs text-slate-500 font-mono uppercase tracking-widest mb-4">Filtros</p>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="space-y-1.5">
-            <label className="text-label text-[var(--text-quaternary)] font-bold">Data Inicial</label>
+          <div>
+            <label className="text-xs text-slate-600 font-mono uppercase tracking-widest block mb-2">Data Inicial</label>
             <input 
               type="date" 
               value={dataInicio}
               onChange={(e) => setDataInicio(e.target.value)}
-              className="w-full px-4 py-3 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-body-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300"
+              className="w-full px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all font-mono"
             />
           </div>
-          <div className="space-y-1.5">
-            <label className="text-label text-[var(--text-quaternary)] font-bold">Data Final</label>
+          <div>
+            <label className="text-xs text-slate-600 font-mono uppercase tracking-widest block mb-2">Data Final</label>
             <input 
               type="date" 
               value={dataFim} 
               onChange={(e) => setDataFim(e.target.value)}
-              className="w-full px-4 py-3 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-body-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300"
+              className="w-full px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all font-mono"
             />
           </div>
-          <div className="space-y-1.5">
-            <label className="text-label text-[var(--text-quaternary)] font-bold">Programa</label>
+          <div>
+            <label className="text-xs text-slate-600 font-mono uppercase tracking-widest block mb-2">Programa</label>
             <select 
               value={programa} 
               onChange={(e) => setPrograma(e.target.value)}
-              className="w-full px-4 py-3 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-body-sm font-bold text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300 appearance-none cursor-pointer"
+              className="w-full px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all appearance-none cursor-pointer font-mono"
             >
-              <option value="Todos">Todos os Programas</option>
+              <option value="Todos">Todos</option>
               <option value="Jornal da Manhã">Jornal da Manhã</option>
               <option value="Edição Meio-Dia">Edição Meio-Dia</option>
               <option value="Jornal da Noite">Jornal da Noite</option>
             </select>
           </div>
-          <div className="space-y-1.5">
-            <label className="text-label text-[var(--text-quaternary)] font-bold">EVENTOS</label>
+          <div>
+            <label className="text-xs text-slate-600 font-mono uppercase tracking-widest block mb-2">Eventos</label>
             <select 
               value={eventoFiltro} 
               onChange={(e) => setEventoFiltro(e.target.value as EventoType | "Todos")}
-              className="w-full px-4 py-3 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-body-sm font-bold text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300 appearance-none cursor-pointer"
+              className="w-full px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all appearance-none cursor-pointer font-mono"
             >
-              <option value="Todos">MOSTRAR TUDO</option>
+              <option value="Todos">Mostrar Tudo</option>
               <option value="Pautas Caídas">Pautas Caídas</option>
               <option value="Relatórios">Relatórios</option>
               <option value="Outros">Outros</option>
@@ -128,34 +126,31 @@ function RelatoriosPage() {
         </div>
       </div>
 
-      {/* List */}
       <div className="space-y-4">
         {loading ? (
-          <div className="text-center py-12 text-[var(--text-tertiary)] italic">Carregando relatórios...</div>
+          <div className="text-center py-12 text-slate-500 italic font-mono text-xs">CARREGANDO...</div>
         ) : relatorios.length === 0 ? (
-          <div className="bg-[var(--bg-secondary)] border border-dashed border-[var(--border-light)] rounded-3xl p-12 text-center text-[var(--text-tertiary)] text-body-sm shadow-[var(--shadow-md)]">
-            Nenhum relatório encontrado para os filtros selecionados.
+          <div className="bg-[#0f0f12] border border-dashed border-[#22c55e]/30 rounded-lg p-12 text-center text-slate-500 text-xs font-mono">
+            SEM REGISTROS
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4">
             {relatorios.map((r) => (
-              <div key={r.id} className="bg-[var(--bg-secondary)] border border-[var(--border-light)] rounded-[2rem] p-6 hover:bg-[var(--bg-overlay)] hover:border-[var(--accent-primary)]/30 transition-all duration-300 group shadow-[var(--shadow-md)]">
+              <div key={r.id} className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-4 hover:bg-[#1a1a21] hover:border-[#22c55e]/40 transition-all group backdrop-blur-lg shadow-xl hover:shadow-[0_0_20px_#22c55e10]">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3 flex-wrap">
-                    <span className="bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] text-label px-2.5 py-1 rounded-full border border-[var(--accent-primary)]/20">
+                    <span className="bg-[#22c55e]/20 text-[#22c55e] text-xs px-3 py-1.5 rounded-md border border-[#22c55e]/40 font-mono font-bold uppercase tracking-wider">
                       {r.evento}
                     </span>
-                    <span className="text-caption text-[var(--text-tertiary)] flex items-center gap-1">
-                      <CalendarIcon className="h-3.5 w-3.5 text-[var(--text-quaternary)]" />
-                      {format(new Date(r.data + "T12:00:00"), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
-                    </span>
-                    <span className="text-caption font-bold text-[var(--accent-secondary)]">
-                      {r.programa}
+                    <span className="text-xs text-slate-500 flex items-center gap-1 font-mono">
+                      <CalendarIcon className="h-3 w-3" />
+                      {new Date(r.data).toLocaleDateString("pt-BR")}
                     </span>
                   </div>
+                  <span className="text-xs text-slate-600 font-mono uppercase tracking-widest">{r.programa}</span>
                 </div>
-                <h3 className="text-h3 font-bold mb-2 text-[var(--text-primary)] group-hover:text-[var(--accent-primary)] transition-colors uppercase tracking-tight">{r.retranca}</h3>
-                <p className="text-body-sm text-[var(--text-secondary)] line-clamp-3 whitespace-pre-wrap leading-relaxed">{r.texto}</p>
+                <h3 className="text-sm font-black text-slate-100 mb-2 font-mono uppercase">{r.retranca}</h3>
+                <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">{r.texto}</p>
               </div>
             ))}
           </div>
@@ -188,7 +183,7 @@ function NewRelatorioModal({ userId, onClose, onSaved }: { userId: string; onClo
     if (!retranca || !texto) return toast.error("Preencha todos os campos obrigatórios.");
     
     setSaving(true);
-    const { error } = await supabase.from("relatorios").insert({
+    const { error } = await supabase.from("relatorio").insert({
       data,
       retranca,
       evento,
@@ -206,98 +201,102 @@ function NewRelatorioModal({ userId, onClose, onSaved }: { userId: string; onClo
   };
 
   return (
-    <div className="fixed inset-0 bg-[var(--bg-primary)]/80 backdrop-blur-xl flex items-center justify-center p-4 z-50 animate-in fade-in duration-300" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-lg flex items-center justify-center p-4 z-50" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()} 
-        className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-[2.5rem] shadow-[var(--shadow-2xl)] w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200"
+        className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg shadow-2xl w-full max-w-2xl overflow-hidden"
       >
-        <div className="p-8 border-b border-[var(--border-subtle)] bg-[var(--bg-overlay-2)] backdrop-blur-sm flex items-center justify-between">
+        <div className="p-6 border-b border-[#22c55e]/10 bg-[#0a0e27] flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-[var(--accent-primary)]/10 rounded-xl">
-               <Plus className="h-5 w-5 text-[var(--accent-primary)]" />
+            <div className="p-2 bg-[#22c55e]/20 rounded-md border border-[#22c55e]/30">
+               <Plus className="h-4 w-4 text-[#22c55e]" />
             </div>
-            <h2 className="text-h2 font-bold tracking-tight text-[var(--text-primary)]">Novo Relatório</h2>
+            <h2 className="text-lg font-black tracking-tight text-white font-mono uppercase">Novo Relatório</h2>
           </div>
-          <button onClick={onClose} className="p-2 rounded-full text-[var(--text-tertiary)] hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)] transition-all duration-300">
-             <Plus className="h-7 w-7 rotate-45" />
+          <button onClick={onClose} className="p-2 rounded-md text-slate-500 hover:bg-[#1a1a21] hover:text-slate-200 transition-all">
+             <span className="text-xl font-mono">✕</span>
           </button>
         </div>
         
-        <form onSubmit={submit} className="p-8 space-y-6">
+        <form onSubmit={submit} className="p-6 space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-label text-[var(--text-quaternary)] font-bold">Data</label>
+            <div>
+              <label className="text-xs text-slate-600 font-mono uppercase tracking-widest block mb-2">Data</label>
               <input 
                 required 
                 type="date" 
                 value={data} 
                 onChange={(e) => setData(e.target.value)}
-                className="w-full px-4 py-3.5 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300"
+                className="w-full px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all font-mono"
               />
             </div>
-            <div className="space-y-1.5">
-              <label className="text-label text-[var(--text-quaternary)] font-bold">Programa</label>
+            <div>
+              <label className="text-xs text-slate-600 font-mono uppercase tracking-widest block mb-2">Programa</label>
               <select 
                 value={programa} 
                 onChange={(e) => setPrograma(e.target.value)} 
-                className="w-full px-4 py-3.5 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300 appearance-none cursor-pointer"
+                className="w-full px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all appearance-none cursor-pointer font-mono"
               >
                 <option value="Jornal da Manhã">Jornal da Manhã</option>
                 <option value="Edição Meio-Dia">Edição Meio-Dia</option>
                 <option value="Jornal da Noite">Jornal da Noite</option>
               </select>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-label text-[var(--text-quaternary)] font-bold">Evento</label>
+            <div>
+              <label className="text-xs text-slate-600 font-mono uppercase tracking-widest block mb-2">Evento</label>
               <select 
                 value={evento} 
                 onChange={(e) => setEvento(e.target.value as EventoType)} 
-                className="w-full px-4 py-3.5 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300 appearance-none cursor-pointer"
+                className="w-full px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all appearance-none cursor-pointer font-mono"
               >
                 <option value="Pautas Caídas">Pautas Caídas</option>
                 <option value="Relatórios">Relatórios</option>
                 <option value="Outros">Outros</option>
               </select>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-label text-[var(--text-quaternary)] font-bold">Retranca / Assunto</label>
+            <div>
+              <label className="text-xs text-slate-600 font-mono uppercase tracking-widest block mb-2">Retranca</label>
               <input 
                 required 
                 placeholder="Ex: ACIDENTE BR-101" 
                 value={retranca} 
                 onChange={(e) => setRetranca(e.target.value)} 
-                className="w-full px-4 py-3.5 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-[var(--text-primary)] placeholder-[var(--text-quaternary)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300"
+                className="w-full px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all font-mono"
               />
             </div>
           </div>
           
-          <div className="space-y-1.5">
-            <div className="flex justify-between items-center">
-              <label className="text-label text-[var(--text-quaternary)] font-bold">Conteúdo do Relatório</label>
-              <span className={`text-caption font-mono ${texto.length > charLimit ? "text-[var(--status-error)]" : "text-[var(--text-tertiary)]"}`}>
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-xs text-slate-600 font-mono uppercase tracking-widest">Conteúdo</label>
+              <span className={`text-xs font-mono ${texto.length > charLimit ? "text-[#ef4444]" : "text-slate-600"}`}>
                 {texto.length} / {charLimit}
               </span>
             </div>
             <textarea 
               required
-              placeholder="Descreva o ocorrido ou motivo da pauta ter caído..." 
+              placeholder="Descreva o ocorrido..." 
               value={texto} 
               onChange={(e) => setTexto(e.target.value.slice(0, charLimit))} 
-              rows={6} 
-              className="w-full px-4 py-3.5 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-[var(--text-primary)] placeholder-[var(--text-quaternary)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300 resize-none leading-relaxed text-body-sm" 
+              rows={5} 
+              className="w-full px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all resize-none leading-relaxed font-mono" 
             />
           </div>
           
-          <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-subtle)]">
-            <button type="button" onClick={onClose} className="px-8 py-3 rounded-2xl text-body-sm font-medium text-[var(--text-secondary)] bg-transparent border border-[var(--border-light)] transition-all duration-300 hover:text-[var(--text-primary)] hover:bg-[var(--bg-overlay)] hover:border-[var(--border-medium)] active:scale-[0.98]">
+          <div className="flex justify-end gap-3 pt-4 border-t border-[#22c55e]/10">
+            <button 
+              type="button" 
+              onClick={onClose} 
+              className="px-6 py-2 rounded-md text-xs font-mono uppercase font-bold text-slate-400 bg-transparent border border-[#22c55e]/30 transition-all hover:text-slate-200 hover:bg-[#1a1a21] hover:border-[#22c55e]/50 active:scale-95"
+            >
               Cancelar
             </button>
             <Button 
               type="submit" 
               disabled={saving || texto.length > charLimit} 
-              className="px-10 py-3 rounded-2xl text-body-sm font-bold bg-[var(--accent-primary)] text-white shadow-[var(--shadow-lg)] transition-all duration-300 hover:shadow-[var(--shadow-xl)] active:scale-[0.98] disabled:opacity-50"
+              className="px-6 py-2 rounded-md text-xs font-mono uppercase font-bold bg-[#22c55e]/10 border border-[#22c55e] text-white transition-all hover:bg-[#22c55e]/20 hover:shadow-lg hover:shadow-[#22c55e]/20 active:scale-95 disabled:opacity-50"
             >
-              {saving ? "Salvando..." : "Salvar Relatório"}
+              {saving ? "SALVANDO..." : "SALVAR"}
             </Button>
           </div>
         </form>

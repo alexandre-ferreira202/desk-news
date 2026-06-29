@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { parseTimeToSeconds, formatSecondsToTime } from "@/lib/time";
 import {
@@ -39,7 +39,7 @@ export const Route = createFileRoute("/espelho")({
   head: () => ({ meta: [{ title: "Espelho — DeskNews" }] }),
   ssr: false,
 });
-
+  
 type ItemStatus = "pendente" | "pronto" | "no_ar" | "exibido" | "cortado";
 
 interface Bloco {
@@ -130,7 +130,7 @@ function EspelhoPage() {
   const [masterDuration, setMasterDuration] = useState("00:00");
   // Set de IDs editando — alimentado por broadcast, visível em todos os browsers
   const [editingItemIds, setEditingItemIds] = useState<Set<string>>(new Set());
-  const broadcastChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const broadcastChannelRef = useRef<null>(null);
 
   const broadcastEditing = useCallback((itemId: string, editando: boolean) => {
     broadcastChannelRef.current?.send({
@@ -164,71 +164,52 @@ function EspelhoPage() {
 
 
   const load = useCallback(async () => {
-    let q = supabase
-      .from("espelho_blocos")
-      .select("*")
-      .eq("data_edicao", date)
-      .order("ordem");
-    if (programa !== "Todos") q = q.eq("programa", programa);
+    let sql = `SELECT * FROM espelho_blocos WHERE data_edicao = $1`;
+    const params: unknown[] = [date];
+    if (programa !== "Todos") {
+      sql += ` AND programa = $2`;
+      params.push(programa);
+    }
+    sql += ` ORDER BY ordem`;
 
-    const { data: b } = await q;
+    const { rows: b } = await db.query(sql, params);
     const loadedBlocos = (b ?? []) as Bloco[];
     setBlocos(loadedBlocos);
 
     if (loadedBlocos.length) {
-      const { data: i } = await supabase
-        .from("espelho_itens")
-        .select("*")
-        .in("bloco_id", loadedBlocos.map((x) => x.id))
-        .order("ordem");
+      const blocoIds = loadedBlocos.map((x) => x.id);
+      const placeholders = blocoIds.map((_, idx) => `$${idx + 1}`).join(", ");
+      const { rows: i } = await db.query(
+        `SELECT * FROM espelho_itens WHERE bloco_id IN (${placeholders}) ORDER BY ordem`,
+        blocoIds
+      );
       setItens((i ?? []) as Item[]);
     } else {
       setItens([]);
     }
   }, [date, programa]);
 
+  // ── Sincroniza mudanças do espelho via POLLING (Neon não tem realtime nativo) ──
   useEffect(() => {
-    const channel = supabase
-      .channel("espelho_sync")
-      .on("postgres_changes", { event: "*", schema: "public", table: "espelho_itens" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "espelho_blocos" }, load)
-      .on("broadcast", { event: "editando" }, ({ payload }) => {
-        const { itemId, editando } = payload as { itemId: string; editando: boolean };
-        setEditingItemIds((prev) => {
-          const next = new Set(prev);
-          if (editando) next.add(itemId);
-          else next.delete(itemId);
-          return next;
-        });
-      })
-      .on("broadcast", { event: "producao" }, ({ payload }) => {
-        const { valor } = payload as { valor: string };
-        setPlannedEditorialDuration(valor);
-      })
-      .on("broadcast", { event: "master" }, ({ payload }) => {
-        const { valor } = payload as { valor: string };
-        setMasterDuration(valor);
-      })
-      .subscribe();
-    broadcastChannelRef.current = channel;
-    return () => { supabase.removeChannel(channel); };
+    const interval = setInterval(() => {
+      load();
+    }, 4000); // recarrega a cada 4s
+
+    return () => {
+      clearInterval(interval);
+    };
   }, [load]);
 
   useEffect(() => {
-    supabase
-      .from("materias")
-      .select(
-        "id,titulo,status,cabeca,tempo_vt,tempo_cab,deixa,entrevistado_nome,entrevistado_funcao,editor_texto,editor_imagem,credito_reporter,estrutura,lide,corpo"
-      )
-      .eq("status", "publicado")
-      .order("created_at", { ascending: false })
-      .then(({ data }) => setMaterias((data ?? []) as Materia[]));
+    db.query(
+      `SELECT id, titulo, status, cabeca, tempo_vt, tempo_cab, deixa, editor_texto, editor_imagem, credito_reporter, estrutura, corpo
+       FROM materias
+       WHERE status = $1
+       ORDER BY created_at DESC`,
+      ["publicado"]
+    ).then(({ rows }) => setMaterias((rows ?? []) as Materia[]));
 
-    supabase
-      .from("profiles")
-      .select("id,display_name")
-      .order("display_name")
-      .then(({ data }) => setProfiles((data ?? []) as Profile[]));
+    setProfiles([]);
   }, []);
 
   useEffect(() => {
@@ -238,84 +219,111 @@ function EspelhoPage() {
   const addBloco = async () => {
     const prog = programa !== "Todos" ? programa : "Jornal da Manhã";
     const ordem = blocos.length + 1;
-    const { error } = await supabase.from("espelho_blocos").insert({
-      data_edicao: date,
-      nome: `Bloco ${ordem}`,
-      ordem,
-      programa: prog,
-    });
-    if (error) toast.error(error.message);
-    else load();
+    try {
+      await db.query(
+        `INSERT INTO espelho_blocos (data_edicao, nome, ordem, programa) VALUES ($1, $2, $3, $4)`,
+        [date, `Bloco ${ordem}`, ordem, prog]
+      );
+      load();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
   };
 
   const addItem = async (bloco_id: string) => {
     const ordem = itens.filter((i) => i.bloco_id === bloco_id).length + 1;
-    const { error } = await supabase.from("espelho_itens").insert({
-      bloco_id,
-      ordem,
-      assunto: "Novo item",
-      formato: "VT",
-      tempo: "1:30",
-      tempo_cab: "0:15",
-    });
-    if (error) toast.error(error.message);
-    else load();
+    try {
+      await db.query(
+        `INSERT INTO espelho_itens (bloco_id, ordem, assunto, formato, tempo, tempo_cab)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [bloco_id, ordem, "Novo item", "VT", "1:30", "0:15"]
+      );
+      load();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
   };
 
   const addFromMateria = async (bloco_id: string, materia_id: string) => {
     const m = materias.find((x) => x.id === materia_id);
     if (!m) return;
     const ordem = itens.filter((i) => i.bloco_id === bloco_id).length + 1;
-    const { error } = await supabase.from("espelho_itens").insert({
-      bloco_id,
-      ordem,
-      assunto: m.titulo,
-      materia_id,
-      formato: "VT",
-      tempo: m.tempo_vt ?? "1:30",
-      tempo_cab: m.tempo_cab ?? "0:15",
-      cabeca: m.cabeca ?? null,
-    });
-    if (error) toast.error(error.message);
-    else load();
+    try {
+      await db.query(
+        `INSERT INTO espelho_itens (bloco_id, ordem, assunto, materia_id, formato, tempo, tempo_cab, cabeca)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          bloco_id,
+          ordem,
+          m.titulo,
+          materia_id,
+          "VT",
+          m.tempo_vt ?? "1:30",
+          m.tempo_cab ?? "0:15",
+          m.cabeca ?? null,
+        ]
+      );
+      load();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
   };
 
   const addComercial = async (bloco_id: string) => {
     const ordem = itens.filter((i) => i.bloco_id === bloco_id).length + 1;
-    const { error } = await supabase.from("espelho_itens").insert({
-      bloco_id,
-      ordem,
-      assunto: "INTERVALO COMERCIAL",
-      formato: "Comercial",
-      tempo: "3:00",
-      tempo_cab: "0:00",
-      status: "pronto",
-    });
-    if (error) toast.error(error.message);
-    else load();
+    try {
+      await db.query(
+        `INSERT INTO espelho_itens (bloco_id, ordem, assunto, formato, tempo, tempo_cab, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [bloco_id, ordem, "INTERVALO COMERCIAL", "Comercial", "3:00", "0:00", "pronto"]
+      );
+      load();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
   };
 
   const updateItem = useCallback(async (id: string, patch: Partial<Item>) => {
-    const { error } = await supabase.from("espelho_itens").update(patch).eq("id", id);
-    if (error) toast.error(error.message);
-    else load();
+    const keys = Object.keys(patch);
+    if (!keys.length) return;
+    const setClause = keys.map((k, idx) => `${k} = $${idx + 1}`).join(", ");
+    const values = keys.map((k) => (patch as any)[k]);
+    try {
+      await db.query(
+        `UPDATE espelho_itens SET ${setClause} WHERE id = $${keys.length + 1}`,
+        [...values, id]
+      );
+      load();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
   }, [load]);
 
   const updateBloco = async (id: string, patch: Partial<Bloco>) => {
-    const { error } = await supabase.from("espelho_blocos").update(patch).eq("id", id);
-    if (error) toast.error(error.message);
-    else load();
+    const keys = Object.keys(patch);
+    if (!keys.length) return;
+    const setClause = keys.map((k, idx) => `${k} = $${idx + 1}`).join(", ");
+    const values = keys.map((k) => (patch as any)[k]);
+    try {
+      await db.query(
+        `UPDATE espelho_blocos SET ${setClause} WHERE id = $${keys.length + 1}`,
+        [...values, id]
+      );
+      load();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
   };
 
   const delItem = async (id: string) => {
     if (!window.confirm("Tem certeza que deseja remover este item do espelho?")) return;
-    await supabase.from("espelho_itens").delete().eq("id", id);
+    await db.query(`DELETE FROM espelho_itens WHERE id = $1`, [id]);
     load();
   };
 
   const delBloco = async (id: string) => {
     if (!window.confirm("Isso apagará o bloco e todos os itens dentro dele. Confirmar?")) return;
-    await supabase.from("espelho_blocos").delete().eq("id", id);
+    await db.query(`DELETE FROM espelho_blocos WHERE id = $1`, [id]);
     load();
   };
 
@@ -444,10 +452,10 @@ function EspelhoPage() {
 
     await Promise.all(
       newItens.map((item) =>
-        supabase
-          .from("espelho_itens")
-          .update({ ordem: item.ordem, bloco_id: item.bloco_id })
-          .eq("id", item.id)
+        db.query(
+          `UPDATE espelho_itens SET ordem = $1, bloco_id = $2 WHERE id = $3`,
+          [item.ordem, item.bloco_id, item.id]
+        )
       )
     );
     load();
@@ -469,12 +477,12 @@ function EspelhoPage() {
   return (
     <div className="p-4 sm:p-6 space-y-4 h-full flex flex-col overflow-hidden">
       {/* Header Premium */}
-      <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] pb-3 shrink-0">
-        <MonitorPlay className="h-5 w-5 text-[var(--text-quaternary)]" />
-        <h1 className="text-h1 font-bold tracking-tight bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent">
+      <div className="flex items-center gap-3 border-b border-[#22c55e]/10 pb-3 shrink-0">
+        <MonitorPlay className="h-5 w-5 text-[#22c55e]" />
+        <h1 className="text-h1 font-bold tracking-tight text-[#22c55e]">
           ESPELHO
         </h1>
-        <span className="text-label text-[var(--text-tertiary)] hidden sm:inline">
+        <span className="text-label text-[#6b7280] hidden sm:inline">
           Exibição · controle de tempo
         </span>
         <div className="ml-auto flex items-center gap-2">
@@ -489,24 +497,24 @@ function EspelhoPage() {
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className="px-4 py-3.5 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-body-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300"
+            className="px-4 py-3.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-body-sm text-[#ffffff] focus:outline-none focus:border-[#22c55e] focus:ring-4 focus:ring-[#22c55e]/10 transition-all duration-300"
           />
           <select
             value={programa}
             onChange={(e) => { setPrograma(e.target.value); try { localStorage.setItem("espelho_programa", e.target.value); } catch {} }}
-            className="px-4 py-3.5 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-body-sm font-bold text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300 appearance-none cursor-pointer"
+            className="px-4 py-3.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-body-sm font-bold text-[#ffffff] focus:outline-none focus:border-[#22c55e] focus:ring-4 focus:ring-[#22c55e]/10 transition-all duration-300 appearance-none cursor-pointer"
           >
             <option value="Todos">Todos os programas</option>
             {PROGRAMAS.map((p) => (
-              <option key={p} value={p} className="bg-[var(--bg-secondary)] text-[var(--text-primary)]">
+              <option key={p} value={p} className="bg-[#141416] text-[#ffffff]">
                 {p}
               </option>
             ))}
           </select>
 
           {/* Previsto */}
-          <div className="font-mono text-display-lg border border-[var(--glass-border)] rounded-3xl px-8 py-4 bg-[var(--glass-bg)] backdrop-blur-xl shadow-[var(--shadow-xl)] flex flex-col items-center justify-center min-w-[160px]">
-            <span className="text-[var(--text-tertiary)] text-label mb-1 font-black">
+          <div className="font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-8 py-4 bg-[#141416] backdrop-blur-xl shadow-xl flex flex-col items-center justify-center min-w-[160px]">
+            <span className="text-[#6b7280] text-label mb-1 font-black">
               PRODUÇÃO
             </span>
             <input
@@ -524,14 +532,14 @@ function EspelhoPage() {
                 setPlannedEditorialDuration(formatted);
                 broadcastProducao(formatted);
               }}
-              className="bg-transparent text-[var(--text-primary)] w-32 text-center focus:outline-none font-bold tracking-tighter text-h2"
+              className="bg-transparent text-[#ffffff] w-32 text-center focus:outline-none font-bold tracking-tighter text-h2"
               placeholder="00:00"
             />
           </div>
 
           {/* Master */}
-          <div className="font-mono text-display-lg border border-[var(--glass-border)] rounded-3xl px-8 py-4 bg-[var(--glass-bg)] backdrop-blur-xl shadow-[var(--shadow-xl)] flex flex-col items-center justify-center min-w-[160px]">
-            <span className="text-[var(--text-tertiary)] text-label mb-1 font-black">
+          <div className="font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-8 py-4 bg-[#141416] backdrop-blur-xl shadow-xl flex flex-col items-center justify-center min-w-[160px]">
+            <span className="text-[#6b7280] text-label mb-1 font-black">
               MASTER
             </span>
             <input
@@ -549,7 +557,7 @@ function EspelhoPage() {
                 setMasterDuration(formatted);
                 broadcastMaster(formatted);
               }}
-              className="bg-transparent text-[var(--text-primary)] w-32 text-center focus:outline-none font-bold tracking-tighter text-h2 tabular-nums"
+              className="bg-transparent text-[#ffffff] w-32 text-center focus:outline-none font-bold tracking-tighter text-h2 tabular-nums"
               placeholder="00:00"
             />
           </div>
@@ -557,10 +565,10 @@ function EspelhoPage() {
           {/* Diff */}
           {diffEditorial.type !== "balanceado" && (
             <div className={cn(
-              "font-mono text-display-lg border rounded-3xl px-8 py-4 flex flex-col items-center justify-center min-w-[160px] shadow-[var(--shadow-xl)]",
+              "font-mono text-display-lg border rounded-lg px-8 py-4 flex flex-col items-center justify-center min-w-[160px] shadow-xl",
               diffEditorial.type === "estouro"
-                ? "bg-[var(--status-error)]/10 text-[var(--status-error)] border-[var(--status-error)]/30"
-                : "bg-[var(--status-success)]/10 text-[var(--status-success)] border-[var(--status-success)]/30"
+                ? "bg-[#ef4444]/10 text-[#ef4444] border-[#ef4444]/30"
+                : "bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/30"
             )}>
               <span className="text-label mb-1 font-black">
                 {diffEditorial.type === "estouro" ? "Estouro" : "Sobra"}
@@ -570,11 +578,11 @@ function EspelhoPage() {
           )}
 
           {/* Total geral */}
-          <div className="font-mono text-display-lg border border-[var(--glass-border)] rounded-3xl px-8 py-4 bg-[var(--glass-bg)] backdrop-blur-xl flex flex-col items-center justify-center min-w-[160px] shadow-[var(--shadow-2xl)]">
-            <span className="text-[var(--text-tertiary)] text-label mb-1 font-black">
+          <div className="font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-8 py-4 bg-[#141416] backdrop-blur-xl flex flex-col items-center justify-center min-w-[160px] shadow-2xl">
+            <span className="text-[#6b7280] text-label mb-1 font-black">
               TOTAL
             </span>
-            <span className="text-[var(--text-primary)] font-bold tracking-tighter text-h2 tabular-nums">{formatSecondsToTime(totalGeralSec)}</span>
+            <span className="text-[#ffffff] font-bold tracking-tighter text-h2 tabular-nums">{formatSecondsToTime(totalGeralSec)}</span>
           </div>
 
 
@@ -582,7 +590,7 @@ function EspelhoPage() {
           {true && (
             <button
               onClick={addBloco}
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-[var(--accent-primary)] text-white text-body-sm font-semibold uppercase tracking-widest shadow-[var(--shadow-lg)] transition-all duration-300 hover:shadow-[var(--shadow-xl)] active:scale-[0.98]"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-md bg-[#22c55e] text-white text-body-sm font-semibold uppercase tracking-widest shadow-lg transition-all duration-300 hover:shadow-xl active:scale-[0.98]"
             >
               <Plus className="h-4 w-4" /> NOVO BLOCO
             </button>
@@ -593,7 +601,7 @@ function EspelhoPage() {
             href={`/tp?date=${date}&programa=${encodeURIComponent(programa ?? "")}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-[var(--status-warning)] text-white text-body-sm font-semibold uppercase tracking-wider hover:bg-[var(--status-warning)]/90 transition-all duration-300 shadow-[var(--shadow-md)] active:scale-[0.98]"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-white text-body-sm font-semibold uppercase tracking-wider hover:border-[#22c55e] hover:ring-4 hover:ring-[#22c55e]/10 transition-all duration-300 shadow-md active:scale-[0.98]"
           >
             <Tv className="h-4 w-4 text-white" /> TP
           </a>
@@ -602,7 +610,7 @@ function EspelhoPage() {
             href={`/playout?date=${date}&programa=${encodeURIComponent(programa ?? "")}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-[var(--status-error)] text-white text-body-sm font-semibold uppercase tracking-wider hover:bg-[var(--status-error)]/90 transition-all duration-300 shadow-[var(--shadow-md)] active:scale-[0.98]"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-white text-body-sm font-semibold uppercase tracking-wider hover:border-[#22c55e] hover:ring-4 hover:ring-[#22c55e]/10 transition-all duration-300 shadow-md active:scale-[0.98]"
           >
             <Tv className="h-4 w-4 text-white" /> PLAYOUT
           </a>
@@ -613,7 +621,7 @@ function EspelhoPage() {
       <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
         <div className="space-y-6 pb-12 overflow-y-auto flex-1">
           {blocos.length === 0 && (
-            <div className="bg-[var(--bg-secondary)] border border-[var(--border-light)] rounded-3xl p-12 text-center text-[var(--text-tertiary)] text-body-sm shadow-[var(--shadow-md)]">
+            <div className="bg-[#141416] border border-[#22c55e]/20 rounded-lg p-12 text-center text-[#6b7280] text-body-sm shadow-md">
               Nenhum bloco para esta data.{true && " Crie um bloco para começar."}
             </div>
           )}
@@ -632,10 +640,10 @@ function EspelhoPage() {
               <div
                 key={b.id}
                 id={b.id}
-                className="bg-[var(--bg-secondary)] border border-[var(--border-light)] rounded-3xl overflow-hidden shadow-[var(--shadow-sm)]"
+                className="group bg-[#141416] border border-[#22c55e]/20 rounded-lg overflow-hidden shadow-sm"
               >
                 {/* Bloco header */}
-                <div className="flex items-center justify-between px-5 py-4 bg-[var(--bg-tertiary)] border-b border-[var(--border-subtle)] gap-3 flex-wrap">
+                <div className="flex items-center justify-between px-5 py-4 bg-[#1c1c1f] border-b border-[#22c55e]/10 gap-3 flex-wrap">
                   <div className="flex items-center gap-3 flex-wrap">
                     <span className="font-mono text-xs px-2 py-0.5 bg-red-600 text-white rounded font-bold">
                       B{String(b.ordem).padStart(2, "0")}
@@ -653,20 +661,20 @@ function EspelhoPage() {
                       <select
                         value={b.programa}
                         onChange={(e) => updateBloco(b.id, { programa: e.target.value })}
-                        className="text-label bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] border border-[var(--accent-primary)]/20 rounded-full px-2.5 py-1 font-bold appearance-none cursor-pointer"
+                        className="text-label bg-[#22c55e]/10 text-[#22c55e] border border-[#22c55e]/20 rounded-full px-2.5 py-1 font-bold appearance-none cursor-pointer"
                       >
                         {PROGRAMAS.map((p) => (
-                          <option key={p} value={p} className="bg-[var(--bg-secondary)] text-[var(--text-primary)]">
+                          <option key={p} value={p} className="bg-[#141416] text-[#ffffff]">
                             {p}
                           </option>
                         ))}
                       </select>
                     ) : (
-                      <span className="text-label px-2.5 py-1 rounded-full bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] font-bold">
+                      <span className="text-label px-2.5 py-1 rounded-full bg-[#22c55e]/10 text-[#22c55e] font-bold">
                         {b.programa}
                       </span>
                     )}
-                    <span className="text-label text-[var(--text-tertiary)]">
+                    <span className="text-label text-[#6b7280]">
                       Apresentador
                     </span>
                     <BlockInput
@@ -674,9 +682,9 @@ function EspelhoPage() {
                       disabled={!temPermissaoEdicaoGrade || !true}
                       placeholder="—"
                       onBlur={(v) => updateBloco(b.id, { apresentador: v || null })}
-                      className="bg-transparent text-body-sm focus:outline-none border-b border-transparent focus:border-[var(--accent-primary)] transition-colors duration-200"
+                      className="bg-transparent text-body-sm focus:outline-none border-b border-transparent focus:border-[#22c55e] transition-colors duration-200"
                     />
-                    <span className="font-mono text-caption text-[var(--text-tertiary)] bg-[var(--bg-primary)] px-2.5 py-1 rounded-md border border-[var(--border-subtle)]">
+                    <span className="font-mono text-caption text-[#6b7280] bg-[#09090b] px-2.5 py-1 rounded-md border border-[#22c55e]/10">
                       {formatSecondsToTime(tempoB)}
                     </span>
                   </div>
@@ -690,27 +698,27 @@ function EspelhoPage() {
                             e.target.value = "";
                           }
                         }}
-                        className="text-caption bg-[var(--bg-secondary)] text-[var(--text-primary)] border border-[var(--border-light)] rounded-xl px-3 py-1.5 focus:outline-none appearance-none cursor-pointer transition-all duration-300 hover:border-[var(--border-medium)] min-w-[180px]"
+                        className="text-caption bg-[#141416] text-[#ffffff] border border-[#22c55e]/20 rounded-xl px-3 py-1.5 focus:outline-none appearance-none cursor-pointer transition-all duration-300 hover:border-[#22c55e]/30 min-w-[180px]"
                         defaultValue=""
                       >
-                        <option value="" className="bg-[var(--bg-secondary)] text-[var(--text-primary)]">
+                        <option value="" className="bg-[#141416] text-[#ffffff]">
                           + Matéria publicada…
                         </option>
                         {materias.map((m) => (
-                          <option key={m.id} value={m.id} className="bg-[var(--bg-secondary)] text-[var(--text-primary)]">
+                          <option key={m.id} value={m.id} className="bg-[#141416] text-[#ffffff]">
                             {m.titulo}
                           </option>
                         ))}
                       </select>
                       <button
                         onClick={() => addItem(b.id)}
-                        className="text-caption px-3 py-1.5 rounded-xl border border-[var(--border-light)] text-[var(--text-secondary)] hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)] transition-all duration-300 active:scale-[0.98]"
+                        className="text-caption px-3 py-1.5 rounded-xl border border-[#22c55e]/20 text-[#9ca3af] hover:bg-[#141416] hover:text-[#ffffff] transition-all duration-300 active:scale-[0.98]"
                       >
                         + Item
                       </button>
                       <button
                         onClick={() => addComercial(b.id)}
-                        className="text-caption px-3 py-1.5 rounded-xl border border-[var(--border-light)] text-[var(--text-secondary)] hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)] transition-all duration-300 active:scale-[0.98]"
+                        className="text-caption px-3 py-1.5 rounded-xl border border-[#22c55e]/20 text-[#9ca3af] hover:bg-[#141416] hover:text-[#ffffff] transition-all duration-300 active:scale-[0.98]"
                       >
                         + Comercial
                       </button>
@@ -719,7 +727,7 @@ function EspelhoPage() {
                       {true && (
                         <button
                           onClick={() => delBloco(b.id)}
-                          className="text-caption px-3 py-1.5 rounded-xl text-[var(--status-error)] hover:bg-[var(--status-error)]/10 transition-all duration-300 active:scale-[0.98]"
+                          className="text-caption px-3 py-1.5 rounded-md text-[#ef4444] hover:bg-[#ef4444]/10 transition-all duration-300 active:scale-[0.98] opacity-0 group-hover:opacity-100"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -729,10 +737,10 @@ function EspelhoPage() {
                 </div>
 
                 {/* Tabela de itens */}
-                <div className="overflow-x-auto text-[var(--text-secondary)]">
+                <div className="overflow-x-auto text-[#9ca3af]">
                   <table className="w-full text-sm min-w-[1100px]">
-                    <thead className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                      <tr className="border-b border-border bg-muted/20">
+                    <thead className="text-[10px] uppercase tracking-widest text-[#6b7280]">
+                      <tr className="border-b [#22c55e]/10 bg-[#1c1c1f]">
                         <th className="w-8"></th>
                         <th className="text-center px-2 py-2 w-10">Status</th>
                         <th className="text-left px-3 py-2 w-12">#</th>
@@ -783,7 +791,7 @@ function EspelhoPage() {
                           <tr>
                             <td
                               colSpan={12}
-                              className="px-3 py-6 text-center text-xs text-muted-foreground"
+                              className="px-3 py-6 text-center text-xs text-[#6b7280]"
                             >
                               Sem itens. Adicione uma matéria publicada ou um item livre.
                             </td>
@@ -806,16 +814,22 @@ function EspelhoPage() {
           item={modalMateria.item}
           onClose={() => setModalMateria(null)}
           onSave={async (updated) => {
-            await supabase.from("materias").update({
-              titulo: updated.titulo,
-              cabeca: updated.cabeca,
-              tempo_vt: updated.tempo_vt,
-              tempo_cab: updated.tempo_cab,
-              deixa: updated.deixa,
-              estrutura: updated.estrutura,
-              corpo: updated.corpo,
-              credito_reporter: updated.credito_reporter,
-            }).eq("id", updated.id);
+            await db.query(
+              `UPDATE materias SET titulo = $1, cabeca = $2, tempo_vt = $3, tempo_cab = $4,
+                deixa = $5, estrutura = $6, corpo = $7, credito_reporter = $8
+               WHERE id = $9`,
+              [
+                updated.titulo,
+                updated.cabeca,
+                updated.tempo_vt,
+                updated.tempo_cab,
+                updated.deixa,
+                updated.estrutura,
+                updated.corpo,
+                updated.credito_reporter,
+                updated.id,
+              ]
+            );
             await updateItem(modalMateria.item.id, {
               assunto: updated.titulo,
               cabeca: updated.cabeca,
@@ -855,15 +869,10 @@ function EspelhoPage() {
           onSave={async (id, assunto, cabeca, tempoCab, tempoVt, reporter) => {
             await updateItem(id, { assunto, cabeca, tempo_cab: tempoCab, tempo: tempoVt });
             if (modalCabeca.materia_id) {
-              await supabase
-                .from("materias")
-                .update({
-                  credito_reporter: reporter,
-                  cabeca,
-                  tempo_cab: tempoCab,
-                  tempo_vt: tempoVt,
-                })
-                .eq("id", modalCabeca.materia_id);
+              await db.query(
+                `UPDATE materias SET credito_reporter = $1, cabeca = $2, tempo_cab = $3, tempo_vt = $4 WHERE id = $5`,
+                [reporter, cabeca, tempoCab, tempoVt, modalCabeca.materia_id]
+              );
             }
             setModalCabeca(null);
           }}
@@ -954,10 +963,10 @@ function SortableRow({
         }
       }}
       className={cn(
-        "border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-overlay)] transition-all duration-300",
-        item.formato === "Comercial" && "bg-[var(--bg-overlay)]",
-        isDragging && "bg-[var(--bg-overlay-2)] opacity-50 z-50 ring-2 ring-[var(--accent-primary)]/20",
-        isCurrent && "bg-red-600/10 text-[var(--text-primary)] font-bold",
+        "group border-b border-[#22c55e]/10 last:border-0 hover:bg-[#141416] transition-all duration-300",
+        item.formato === "Comercial" && "bg-[#141416]",
+        isDragging && "bg-[#1c1c1f] opacity-50 z-50 ring-2 ring-[#22c55e]/20",
+        isCurrent && "bg-red-600/10 text-[#ffffff] font-bold",
         isEditing && !isCurrent && "border-l-4 border-yellow-400 bg-yellow-400/10",
         !isEditing && !isCurrent && borderStyle,
         item.status === "exibido" && "opacity-30 grayscale",
@@ -966,8 +975,8 @@ function SortableRow({
     >
       <td
         className={cn(
-          "w-8 px-2 py-2 text-muted-foreground/40",
-          true && !isLocked && "cursor-grab active:cursor-grabbing hover:bg-[var(--accent-primary)]/10 transition-colors duration-200"
+          "w-8 px-2 py-2 text-[#4b5563]",
+          true && !isLocked && "cursor-grab active:cursor-grabbing hover:bg-[#22c55e]/10 transition-colors duration-200"
         )}
         {...(true && !isLocked ? attributes : {})}
         {...(true && !isLocked ? listeners : {})}
@@ -979,7 +988,7 @@ function SortableRow({
         <div className="flex items-center justify-center">
           <div
             className={cn(
-              "w-3 h-3 rounded-full border border-[var(--border-strong)] transition-all duration-200",
+              "w-3 h-3 rounded-full border border-[#22c55e]/50 transition-all duration-200",
               isEditing && !isCurrent
                 ? "bg-yellow-400 animate-pulse"
                 : item.status === "cortado"
@@ -990,8 +999,8 @@ function SortableRow({
         </div>
       </td>
 
-      <td className="px-3 py-2 font-mono text-[10px] text-muted-foreground font-bold">
-        <span className="text-[var(--text-tertiary)]">{String(currentIndex + 1).padStart(2, "0")}</span>
+      <td className="px-3 py-2 font-mono text-[10px] text-[#6b7280] font-bold">
+        <span className="text-[#6b7280]">{String(currentIndex + 1).padStart(2, "0")}</span>
       </td>
 
       <td className="px-3 py-2">
@@ -1004,13 +1013,13 @@ function SortableRow({
             setAssunto(s);
             onUpdate(item.id, { assunto: s });
           }}
-          className={cn("w-full bg-transparent focus:outline-none font-medium text-[var(--text-primary)]", isCurrent && "text-[var(--text-primary)]")}
+          className={cn("w-full bg-transparent focus:outline-none font-medium text-[#ffffff]", isCurrent && "text-[#ffffff]")}
         />
         {item.materia_id && linkedMateria && (
           <span
             className={cn(
               "inline-block mt-1 text-[10px] uppercase tracking-widest font-bold",
-              isCurrent ? "text-red-400" : "text-[var(--accent-primary)]"
+              isCurrent ? "text-red-400" : "text-[#22c55e]"
             )}
           >
             ● {linkedMateria.titulo}
@@ -1028,9 +1037,9 @@ function SortableRow({
           value={item.formato ?? ""}
           disabled={!true || isLocked}
           onChange={(e) => onUpdate(item.id, { formato: e.target.value || null })}
-          className="w-full text-caption bg-[var(--bg-secondary)] border border-[var(--border-light)] rounded-xl px-3 py-1.5 appearance-none cursor-pointer transition-all duration-300 hover:border-[var(--border-medium)]"
+          className="w-full text-caption bg-[#141416] border border-[#22c55e]/20 rounded-xl px-3 py-1.5 appearance-none cursor-pointer transition-all duration-300 hover:border-[#22c55e]/30"
         >
-          <option value="" className="bg-[var(--bg-secondary)] text-[var(--text-tertiary)]">—</option>
+          <option value="" className="bg-[#141416] text-[#6b7280]">—</option>
           {FORMATOS.map((f) => (
             <option key={f} value={f}>
               {f}
@@ -1044,13 +1053,13 @@ function SortableRow({
           <button
             type="button"
             onClick={() => onSelectCabeca(item)}
-            className="w-16 bg-transparent font-mono text-center text-[var(--text-tertiary)] hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)] rounded-md py-1 transition-all duration-300 border border-transparent hover:border-[var(--border-light)] cursor-pointer focus:outline-none active:scale-[0.98]"
+            className="w-16 bg-transparent font-mono text-center text-[#6b7280] hover:bg-[#141416] hover:text-[#ffffff] rounded-md py-1 transition-all duration-300 border border-transparent hover:border-[#22c55e]/20 cursor-pointer focus:outline-none active:scale-[0.98]"
             title="Editar texto da cabeça"
           >
             <span className="text-caption">{tempoCab || "0:00"}</span>
           </button>
         ) : (
-          <span className="w-16 inline-block font-mono text-center text-muted-foreground">
+          <span className="w-16 inline-block font-mono text-center text-[#6b7280]">
             {tempoCab || "0:00"}
           </span>
         )}
@@ -1063,25 +1072,25 @@ function SortableRow({
           disabled={!true || isLocked}
           onChange={(e) => setTempo(e.target.value)}
           onBlur={() => onUpdate(item.id, { tempo: tempo || null })}
-          className="w-16 bg-transparent font-mono text-center focus:outline-none text-[var(--text-primary)] text-caption"
+          className="w-16 bg-transparent font-mono text-center focus:outline-none text-[#ffffff] text-caption"
         />
       </td>
 
       <td
         className={cn(
           "px-3 py-2 text-center font-bold font-mono",
-          isCurrent ? "text-[var(--text-primary)]" : "text-[var(--accent-primary)]"
+          isCurrent ? "text-[#ffffff]" : "text-[#22c55e]"
         )}
       >
         {calcTotal(item)}
       </td>
 
       <td className="px-3 py-2">
-        <span className="text-caption text-[var(--text-tertiary)]">{linkedMateria?.editor_texto ?? "—"}</span>
+        <span className="text-caption text-[#6b7280]">{linkedMateria?.editor_texto ?? "—"}</span>
       </td>
 
       <td className="px-3 py-2">
-        <span className="text-caption text-[var(--text-tertiary)]">{linkedMateria?.editor_imagem ?? "—"}</span>
+        <span className="text-caption text-[#6b7280]">{linkedMateria?.editor_imagem ?? "—"}</span>
       </td>
 
       <td className="px-3 py-2">
@@ -1090,7 +1099,7 @@ function SortableRow({
             value={item.status ?? "pendente"}
             disabled={isLocked}
             onChange={(e) => onUpdate(item.id, { status: e.target.value as ItemStatus })}
-            className="text-caption bg-[var(--bg-secondary)] border border-[var(--border-light)] rounded-md px-2 py-1 w-full appearance-none cursor-pointer transition-all duration-300 hover:border-[var(--border-medium)]"
+            className="text-caption bg-[#141416] border border-[#22c55e]/20 rounded-md px-2 py-1 w-full appearance-none cursor-pointer transition-all duration-300 hover:border-[#22c55e]/30"
           >
             <option value="pendente">Pendente</option>
             <option value="pronto">Pronto</option>
@@ -1100,7 +1109,7 @@ function SortableRow({
           </select>
         )}
         {!true && (
-          <span className="text-caption text-[var(--text-tertiary)] capitalize">
+          <span className="text-caption text-[#6b7280] capitalize">
             {item.status?.replace("_", " ") ?? "—"}
           </span>
         )}
@@ -1110,7 +1119,7 @@ function SortableRow({
         {true && (
           <button
             onClick={() => onDelete(item.id)}
-            className="p-1.5 rounded-full text-[var(--text-tertiary)] hover:bg-[var(--status-error)]/10 hover:text-[var(--status-error)] transition-all duration-300 active:scale-[0.98]"
+            className="p-1.5 rounded-full text-[#6b7280] hover:bg-[#ef4444]/10 hover:text-[#ef4444] transition-all duration-300 active:scale-[0.98] opacity-0 group-hover:opacity-100"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -1182,15 +1191,15 @@ function MateriaEditModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-[var(--bg-primary)]/80 backdrop-blur-xl flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-[#09090b]/80 backdrop-blur-xl flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
-        className="bg-[var(--glass-bg)] border border-yellow-400/30 rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-auto shadow-[var(--shadow-2xl)] flex flex-col"
+        className="bg-[#141416] border border-yellow-400/30 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-auto shadow-2xl flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-5 flex items-start justify-between gap-4 border-b border-yellow-400/20 sticky top-0 bg-[var(--glass-bg)] z-10">
+        <div className="px-6 py-5 flex items-start justify-between gap-4 border-b border-yellow-400/20 sticky top-0 bg-[#141416] z-10">
           <div className="flex-1">
             <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold text-yellow-500 mb-2">
               <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse inline-block" />
@@ -1199,7 +1208,7 @@ function MateriaEditModal({
             <input
               value={titulo}
               onChange={(e) => setTitulo(e.target.value)}
-              className="w-full bg-transparent text-h2 font-bold focus:outline-none border-b border-transparent focus:border-yellow-400/50 transition-colors text-[var(--text-primary)]"
+              className="w-full bg-transparent text-h2 font-bold focus:outline-none border-b border-transparent focus:border-yellow-400/50 transition-colors text-[#ffffff]"
               placeholder="TÍTULO DA MATÉRIA"
             />
           </div>
@@ -1209,7 +1218,7 @@ function MateriaEditModal({
               type="button"
               title="Abrir lauda completa"
               onClick={() => navigate({ to: "/redacao", search: { edit: materia.id } })}
-              className="p-2 rounded-xl text-[var(--text-tertiary)] hover:bg-yellow-400/10 hover:text-yellow-400 transition-all duration-200 active:scale-[0.98]"
+              className="p-2 rounded-xl text-[#6b7280] hover:bg-yellow-400/10 hover:text-yellow-400 transition-all duration-200 active:scale-[0.98]"
             >
               <Pencil className="h-5 w-5" />
             </button>
@@ -1217,7 +1226,7 @@ function MateriaEditModal({
               type="button"
               onClick={onClose}
               title="Fechar"
-              className="p-2 rounded-xl text-[var(--text-tertiary)] hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)] transition-all duration-200 active:scale-[0.98]"
+              className="p-2 rounded-xl text-[#6b7280] hover:bg-[#141416] hover:text-[#ffffff] transition-all duration-200 active:scale-[0.98]"
             >
               <Plus className="h-6 w-6 rotate-45" />
             </button>
@@ -1228,28 +1237,28 @@ function MateriaEditModal({
         <div className="p-6 space-y-5">
           {/* Tempos + Repórter */}
           <div className="grid grid-cols-3 gap-4">
-            <div className="border border-[var(--border-subtle)] rounded-xl p-4 bg-[var(--bg-overlay)]">
-              <div className="text-label text-[var(--text-quaternary)] mb-2">Tempo Cabeça</div>
+            <div className="border border-[#22c55e]/10 rounded-xl p-4 bg-[#141416]">
+              <div className="text-label text-[#4b5563] mb-2">Tempo Cabeça</div>
               <input
                 value={tempoCab}
                 onChange={(e) => setTempoCab(e.target.value)}
-                className="w-full bg-transparent font-mono text-body text-center focus:outline-none border-b border-transparent focus:border-[var(--accent-primary)]/50 text-[var(--text-primary)]"
+                className="w-full bg-transparent font-mono text-body text-center focus:outline-none border-b border-transparent focus:border-[#22c55e]/50 text-[#ffffff]"
               />
             </div>
-            <div className="border border-[var(--border-subtle)] rounded-xl p-4 bg-[var(--bg-overlay)]">
-              <div className="text-label text-[var(--text-quaternary)] mb-2">Tempo VT</div>
+            <div className="border border-[#22c55e]/10 rounded-xl p-4 bg-[#141416]">
+              <div className="text-label text-[#4b5563] mb-2">Tempo VT</div>
               <input
                 value={tempoVt}
                 onChange={(e) => setTempoVt(e.target.value)}
-                className="w-full bg-transparent font-mono text-body text-center focus:outline-none border-b border-transparent focus:border-[var(--accent-primary)]/50 text-[var(--text-primary)]"
+                className="w-full bg-transparent font-mono text-body text-center focus:outline-none border-b border-transparent focus:border-[#22c55e]/50 text-[#ffffff]"
               />
             </div>
-            <div className="border border-[var(--border-subtle)] rounded-xl p-4 bg-[var(--bg-overlay)]">
-              <div className="text-label text-[var(--text-quaternary)] mb-2">Repórter</div>
+            <div className="border border-[#22c55e]/10 rounded-xl p-4 bg-[#141416]">
+              <div className="text-label text-[#4b5563] mb-2">Repórter</div>
               <input
                 value={reporter}
                 onChange={(e) => setReporter(e.target.value)}
-                className="w-full bg-transparent text-body focus:outline-none border-b border-transparent focus:border-[var(--accent-primary)]/50 text-[var(--text-primary)]"
+                className="w-full bg-transparent text-body focus:outline-none border-b border-transparent focus:border-[#22c55e]/50 text-[#ffffff]"
                 placeholder="Nome..."
               />
             </div>
@@ -1258,19 +1267,19 @@ function MateriaEditModal({
           {/* Cabeça */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <div className="text-label text-[var(--text-quaternary)]">Cabeça do Âncora</div>
-              <div className="text-label text-[var(--text-quaternary)]">
-                Palavras: <span className="font-bold text-[var(--text-primary)]">{wordCount}</span>
+              <div className="text-label text-[#4b5563]">Cabeça do Âncora</div>
+              <div className="text-label text-[#4b5563]">
+                Palavras: <span className="font-bold text-[#ffffff]">{wordCount}</span>
               </div>
             </div>
             <div className="flex">
-              <div className="w-0.5 bg-[var(--accent-primary)] rounded-full mr-4 opacity-70 shrink-0" />
+              <div className="w-0.5 bg-[#22c55e] rounded-full mr-4 opacity-70 shrink-0" />
               <textarea
                 value={cabeca}
                 onChange={handleCabecaChange}
                 rows={4}
                 autoFocus
-                className="w-full bg-transparent italic text-body focus:outline-none resize-none leading-relaxed text-[var(--text-primary)] placeholder-[var(--text-quaternary)]"
+                className="w-full bg-transparent italic text-body focus:outline-none resize-none leading-relaxed text-[#ffffff] placeholder-[#4b5563]"
                 placeholder="Texto da cabeça do âncora..."
               />
             </div>
@@ -1278,46 +1287,46 @@ function MateriaEditModal({
 
           {/* Deixa */}
           <div>
-            <div className="text-label text-[var(--text-quaternary)] mb-2">Deixa (últimas palavras do VT)</div>
+            <div className="text-label text-[#4b5563] mb-2">Deixa (últimas palavras do VT)</div>
             <input
               value={deixa}
               onChange={(e) => setDeixa(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] transition-all text-body-sm"
+              className="w-full px-3 py-2 rounded-xl bg-[#141416] border border-[#22c55e]/20 text-[#ffffff] focus:outline-none focus:border-[#22c55e] transition-all text-body-sm"
               placeholder="...na reportagem de hoje."
             />
           </div>
 
           {/* Roteiro */}
           <div>
-            <div className="text-label text-[var(--text-quaternary)] mb-2">Roteiro / Decupagem (VT)</div>
+            <div className="text-label text-[#4b5563] mb-2">Roteiro / Decupagem (VT)</div>
             <textarea
               value={estrutura}
               onChange={(e) => setEstrutura(e.target.value)}
               rows={7}
-              className="w-full px-4 py-3 rounded-2xl bg-[var(--bg-overlay)] border border-[var(--border-light)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] transition-all resize-none font-mono text-caption leading-relaxed whitespace-pre-wrap placeholder-[var(--text-quaternary)]"
+              className="w-full px-4 py-3 rounded-md bg-[#141416] border border-[#22c55e]/20 text-[#ffffff] focus:outline-none focus:border-[#22c55e] transition-all resize-none font-mono text-caption leading-relaxed whitespace-pre-wrap placeholder-[#4b5563]"
               placeholder={"[OFF]\n\n[SONORA] NOME / FUNÇÃO\n\n[PASSAGEM] REPÓRTER // LOCAL"}
             />
           </div>
 
           {/* Corpo */}
           <div>
-            <div className="text-label text-[var(--text-quaternary)] mb-2">Matéria Web (texto corrido)</div>
+            <div className="text-label text-[#4b5563] mb-2">Matéria Web (texto corrido)</div>
             <textarea
               value={corpo}
               onChange={(e) => setCorpo(e.target.value)}
               rows={4}
-              className="w-full px-4 py-3 rounded-2xl bg-[var(--bg-overlay)] border border-[var(--border-light)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] transition-all resize-none text-body-sm placeholder-[var(--text-quaternary)]"
+              className="w-full px-4 py-3 rounded-md bg-[#141416] border border-[#22c55e]/20 text-[#ffffff] focus:outline-none focus:border-[#22c55e] transition-all resize-none text-body-sm placeholder-[#4b5563]"
               placeholder="Texto corrido para publicação web..."
             />
           </div>
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-[var(--border-subtle)] flex justify-end sticky bottom-0 bg-[var(--glass-bg)]">
+        <div className="px-6 py-4 border-t border-[#22c55e]/10 flex justify-end sticky bottom-0 bg-[#141416]">
           <button
             type="button"
             onClick={handleSave}
-            className="px-8 py-3 rounded-2xl text-body font-bold text-white bg-[var(--accent-primary)] shadow-[var(--shadow-lg)] hover:shadow-[var(--shadow-xl)] transition-all duration-300 active:scale-[0.98]"
+            className="px-8 py-3 rounded-md text-body font-bold text-white bg-[#22c55e] shadow-lg hover:shadow-xl transition-all duration-300 active:scale-[0.98]"
           >
             SALVAR E FECHAR
           </button>
@@ -1365,36 +1374,36 @@ function CabecaEditorModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-[var(--bg-primary)]/80 backdrop-blur-xl flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-[#09090b]/80 backdrop-blur-xl flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
-        className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-3xl max-w-2xl w-full shadow-[var(--shadow-2xl)] flex flex-col"
+        className="bg-[#141416] border border-[#22c55e]/20 rounded-lg max-w-2xl w-full shadow-2xl flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-6 py-5 flex items-start justify-between gap-4 border-b border-[var(--border-subtle)]">
+        <div className="px-6 py-5 flex items-start justify-between gap-4 border-b border-[#22c55e]/10">
           <div className="flex-1">
-            <div className="text-label text-[var(--accent-primary)] font-bold mb-1.5">
+            <div className="text-label text-[#22c55e] font-bold mb-1.5">
               Estrutura da Matéria
             </div>
             <input
               value={assunto}
               onChange={(e) => setAssunto(e.target.value)}
-              className="w-full bg-transparent text-h2 font-bold focus:outline-none uppercase border-b border-transparent focus:border-[var(--accent-primary)]/50 transition-colors duration-200 text-[var(--text-primary)]"
+              className="w-full bg-transparent text-h2 font-bold focus:outline-none uppercase border-b border-transparent focus:border-[#22c55e]/50 transition-colors duration-200 text-[#ffffff]"
               placeholder="RETRANCA / ASSUNTO"
             />
           </div>
           <div className="flex items-center gap-3">
             <button
               onClick={() => onSave(item.id, assunto, text, tempoCab, tempoVt, reporter)}
-              className="p-1.5 rounded-full text-[var(--text-tertiary)] hover:bg-[var(--bg-overlay)] hover:text-[var(--accent-primary)] transition-all duration-300 active:scale-[0.98]"
+              className="p-1.5 rounded-full text-[#6b7280] hover:bg-[#141416] hover:text-[#22c55e] transition-all duration-300 active:scale-[0.98]"
               title="Salvar"
             >
               <Pencil className="h-5 w-5" />
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-full text-[var(--text-tertiary)] hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)] transition-all duration-300 active:scale-[0.98]"
+              className="p-1.5 rounded-full text-[#6b7280] hover:bg-[#141416] hover:text-[#ffffff] transition-all duration-300 active:scale-[0.98]"
               title="Fechar"
             >
               <Plus className="h-6 w-6 rotate-45" />
@@ -1404,57 +1413,57 @@ function CabecaEditorModal({
 
         <div className="p-6 space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="border border-[var(--border-subtle)] rounded-xl p-4 bg-[var(--bg-overlay)]">
-              <div className="text-label text-[var(--text-quaternary)] mb-2">
+            <div className="border border-[#22c55e]/10 rounded-xl p-4 bg-[#141416]">
+              <div className="text-label text-[#4b5563] mb-2">
                 Tempo (Cab + VT)
               </div>
-              <div className="flex items-center font-mono text-body-lg gap-2 text-[var(--text-primary)]">
+              <div className="flex items-center font-mono text-body-lg gap-2 text-[#ffffff]">
                 <input
                   value={tempoCab}
                   onChange={(e) => setTempoCab(e.target.value)}
-                  className="w-16 bg-transparent text-center focus:outline-none border-b border-transparent focus:border-[var(--accent-primary)]/50 transition-colors duration-200"
+                  className="w-16 bg-transparent text-center focus:outline-none border-b border-transparent focus:border-[#22c55e]/50 transition-colors duration-200"
                 />
-                <span className="text-[var(--text-tertiary)]">+</span>
+                <span className="text-[#6b7280]">+</span>
                 <input
                   value={tempoVt}
                   onChange={(e) => setTempoVt(e.target.value)}
-                  className="w-16 bg-transparent text-center focus:outline-none border-b border-transparent focus:border-[var(--accent-primary)]/50 transition-colors duration-200"
+                  className="w-16 bg-transparent text-center focus:outline-none border-b border-transparent focus:border-[#22c55e]/50 transition-colors duration-200"
                 />
               </div>
             </div>
-            <div className="border border-[var(--border-subtle)] rounded-xl p-4 bg-[var(--bg-overlay)]">
-              <div className="text-label text-[var(--text-quaternary)] mb-2">
+            <div className="border border-[#22c55e]/10 rounded-xl p-4 bg-[#141416]">
+              <div className="text-label text-[#4b5563] mb-2">
                 Repórter
               </div>
               {item.materia_id ? (
                 <input
                   value={reporter}
                   onChange={(e) => setReporter(e.target.value)}
-                  className="w-full bg-transparent text-body mt-1.5 focus:outline-none border-b border-transparent focus:border-[var(--accent-primary)]/50 transition-colors duration-200 text-[var(--text-primary)]"
+                  className="w-full bg-transparent text-body mt-1.5 focus:outline-none border-b border-transparent focus:border-[#22c55e]/50 transition-colors duration-200 text-[#ffffff]"
                   placeholder="Nome do repórter..."
                 />
               ) : (
-                <div className="mt-1.5 text-body-sm text-[var(--text-tertiary)]">— (Item sem matéria)</div>
+                <div className="mt-1.5 text-body-sm text-[#6b7280]">— (Item sem matéria)</div>
               )}
             </div>
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-3">
-              <div className="text-label text-[var(--text-quaternary)]">
+              <div className="text-label text-[#4b5563]">
                 Cabeça do Âncora
               </div>
-              <div className="text-label text-[var(--text-quaternary)]">
+              <div className="text-label text-[#4b5563]">
                 Palavras:{" "}
-                <span className="font-bold text-[var(--text-primary)]">{wordCount}</span>
+                <span className="font-bold text-[#ffffff]">{wordCount}</span>
               </div>
             </div>
             <div className="flex">
-              <div className="w-0.5 bg-[var(--accent-primary)] rounded-l-sm mr-4 opacity-80"></div>
+              <div className="w-0.5 bg-[#22c55e] rounded-l-sm mr-4 opacity-80"></div>
               <textarea
                 value={text}
                 onChange={handleTextChange}
-                className="w-full h-32 bg-transparent italic text-body focus:outline-none resize-none leading-relaxed text-[var(--text-primary)]"
+                className="w-full h-32 bg-transparent italic text-body focus:outline-none resize-none leading-relaxed text-[#ffffff]"
                 placeholder="Digite a cabeça do âncora aqui..."
                 autoFocus
               />
@@ -1464,7 +1473,7 @@ function CabecaEditorModal({
           <div className="pt-2 flex justify-end">
             <button
               onClick={() => onSave(item.id, assunto, text, tempoCab, tempoVt, reporter)}
-              className="px-6 py-3 rounded-2xl text-body font-semibold text-white bg-[var(--accent-primary)] shadow-[var(--shadow-lg)] transition-all duration-300 hover:shadow-[var(--shadow-xl)] active:scale-[0.98]"
+              className="px-6 py-3 rounded-md text-body font-semibold text-white bg-[#22c55e] shadow-lg transition-all duration-300 hover:shadow-xl active:scale-[0.98]"
             >
               SALVAR E FECHAR
             </button>

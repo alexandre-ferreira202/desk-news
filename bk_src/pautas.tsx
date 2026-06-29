@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import {
   Plus, Rss, ExternalLink, RefreshCw, Loader2, Printer, Trash2, Clock,
   ChevronLeft, ChevronRight, FileText, LayoutGrid, Search, Megaphone, Archive,
-  CalendarIcon, Pencil,
+  CalendarIcon, Pencil, MapPin,
 } from "lucide-react";
 import { fetchPortais, type PortalFeed, type PortalNews } from "@/lib/portais.functions";
 import { Calendar } from "@/components/ui/calendar";
@@ -62,8 +62,6 @@ interface QuadroCard {
 interface Aviso { id: string; assunto: string; data: string; autor_id: string; }
 interface VtGaveta { id: string; programa: string; retranca: string; data_pronto: string; observacao: string | null; autor_id: string; }
 
-// FIX: removido `const sb: any = supabase` — era um alias desnecessário que contornava tipagem
-
 function ymd(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -72,8 +70,6 @@ function ymd(d: Date) {
 }
 
 type Tab = "quadro" | "form" | "search" | "avisos" | "gaveta" | "portais";
-
-/* ========================= PAGE ========================= */
 
 function PautasPage() {
   const [tab, setTab] = useState<Tab>("quadro");
@@ -96,1402 +92,986 @@ function PautasPage() {
   };
 
   return (
-    <div className="p-4 sm:p-6 space-y-4">
-      <div className="flex items-center gap-3 border-b border-[var(--border-light)] pb-3">
-        <FileText className="h-5 w-5 text-[var(--accent-primary)]" />
-        <h1 className="font-mono uppercase tracking-widest text-sm sm:text-base">Pautas</h1>
-        <span className="text-[10px] uppercase tracking-widest text-[var(--text-secondary)] hidden sm:inline">
-          Redação · controle editorial
-        </span>
+    <div className="min-h-screen bg-[#09090b] text-white p-4 sm:p-6 space-y-6">
+      <div className="mb-8">
+        <p className="text-xs text-slate-600 font-mono uppercase tracking-widest mb-2">Gestão de Conteúdo</p>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center h-9 w-9 rounded-md bg-[#22c55e]/10 border border-[#22c55e]/40">
+            <FileText className="h-5 w-5 text-[#22c55e]" />
+          </div>
+          <h1 className="text-3xl font-black tracking-tight font-mono uppercase text-white">PAUTAS</h1>
+        </div>
       </div>
 
-      <nav className="flex gap-1 overflow-x-auto border-b border-[var(--border-light)] -mx-1 px-1">
-        {tabs.map(({ k, label, icon: Icon }) => (
-          <button
-            key={k}
-            onClick={() => {
-              setTab(k);
-              if (k !== "form") setPautaToEdit(null);
-            }}
-            className={cn(
-              "px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium uppercase tracking-wider border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5",
-              tab === k
-                ? "border-[var(--accent-primary)] text-[var(--accent-primary))]"
-                : "border-transparent text-[var(--text-secondary)] hover:text-[var(--accent-primary))]"
-            )}
-          >
-            <Icon className="h-3.5 w-3.5" /> {label}
-          </button>
-        ))}
-      </nav>
-
-      <div>
-        {tab === "quadro"  && <QuadroSemanal />}
-        {tab === "form"    && (
-          <FormularioPauta
-            initialPauta={pautaToEdit}
-            initialDate={pautaDate}
-            onEditingChange={(p, d) => { setPautaToEdit(p); if (d) setPautaDate(d); }}
-          />
-        )}
-        {tab === "search"  && <SearchPautas onEdit={handleEdit} />}
-        {tab === "avisos"  && <AvisosPanel />}
-        {tab === "gaveta"  && <GavetaVTs />}
-        {tab === "portais" && <PortaisPanel />}
+      <div className="flex flex-wrap gap-3 border-b border-[#22c55e]/20 pb-5 items-center justify-between">
+        <div className="flex flex-wrap gap-3">
+          {tabs.map(({ k, label, icon: Icon }) => (
+            <button
+              key={k}
+              onClick={() => setTab(k)}
+              className={`flex items-center gap-2.5 px-5 py-2.5 rounded-lg text-body-sm font-sans uppercase tracking-wider font-bold transition-all ${
+                tab === k
+                  ? "bg-[#22c55e]/20 border border-[#22c55e] text-[#22c55e]"
+                  : "bg-transparent border border-[#22c55e]/30 text-slate-400 hover:border-[#22c55e]/50 hover:text-slate-300"
+              }`}
+            >
+              <Icon className="h-5 w-5" />
+              {label}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => {
+            setPautaToEdit(null);
+            setPautaDate(new Date());
+            setTab("form");
+          }}
+          className="flex items-center gap-2.5 px-5 py-2.5 rounded-lg bg-[#22c55e]/10 border border-[#22c55e] text-[#22c55e] text-xs font-black uppercase tracking-wider transition-all hover:bg-[#22c55e]/20 hover:shadow-lg hover:shadow-[#22c55e]/20 active:scale-95 font-mono"
+        >
+          <Plus className="h-5 w-5" /> Nova Pauta
+        </button>
       </div>
+
+      {tab === "quadro" && <QuadroTab pautaDate={pautaDate} setPautaDate={setPautaDate} onEdit={handleEdit} />}
+      {tab === "form" && <FormTab pautaToEdit={pautaToEdit} pautaDate={pautaDate} onSaved={() => { setPautaToEdit(null); setTab("quadro"); }} />}
+      {tab === "search" && <SearchTab onEdit={handleEdit} />}
+      {tab === "avisos" && <AvisosTab />}
+      {tab === "gaveta" && <GavetaTab />}
+      {tab === "portais" && <PortaisTab />}
     </div>
   );
 }
 
-/* ========================= QUADRO SEMANAL ========================= */
+const DIAS_SEMANA = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
 
-const DIAS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
-
-function startOfWeek(d: Date): Date {
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  const r = new Date(d);
-  r.setDate(d.getDate() + diff);
-  r.setHours(0, 0, 0, 0);
-  return r;
+function inicioDaSemana(d: Date) {
+  const dt = new Date(d);
+  const dow = dt.getDay(); // 0=Domingo
+  const diff = dow === 0 ? -6 : 1 - dow; // volta até segunda
+  dt.setDate(dt.getDate() + diff);
+  dt.setHours(0, 0, 0, 0);
+  return dt;
 }
 
-function QuadroSemanal() {
-  const user = null;
-  const [weekStart, setWeekStart] = useState<Date>(() => startOfWeek(new Date()));
+function QuadroTab({ pautaDate, setPautaDate, onEdit }: { pautaDate: Date; setPautaDate: (d: Date) => void; onEdit: (p: Pauta) => void }) {
+  const [semanaInicio, setSemanaInicio] = useState<Date>(() => inicioDaSemana(pautaDate));
   const [cards, setCards] = useState<QuadroCard[]>([]);
-  const [editing, setEditing] = useState<{ dia: number; turno: "manha" | "tarde"; card?: QuadroCard } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [novoCard, setNovoCard] = useState<{ dia: number; turno: "manha" | "tarde" } | null>(null);
+  const [retranca, setRetranca] = useState("");
+  const [reporter, setReporter] = useState("");
+  const [horario, setHorario] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  // FIX: load com useCallback para estabilizar referência usada no useEffect
+  const semanaStr = ymd(semanaInicio);
+
   const load = useCallback(async () => {
+    setLoading(true);
     const { data, error } = await supabase
       .from("quadro_cards")
       .select("*")
-      .eq("semana_inicio", ymd(weekStart))
+      .eq("semana_inicio", semanaStr)
       .order("ordem", { ascending: true });
     if (error) toast.error(error.message);
     else setCards((data ?? []) as QuadroCard[]);
-  }, [weekStart]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const remove = async (id: string) => {
-    if (!window.confirm("Remover este card?")) return;
-    const { error } = await supabase.from("quadro_cards").delete().eq("id", id);
-    if (error) toast.error(error.message);
-    else load();
-  };
-
-  const navWeek = (delta: number) => {
-    const d = new Date(weekStart);
-    d.setDate(d.getDate() + delta * 7);
-    setWeekStart(d);
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 flex-wrap">
-        <Button variant="outline" size="sm" onClick={() => navWeek(-1)}><ChevronLeft className="h-4 w-4" /></Button>
-        <div className="text-sm font-mono">
-          Semana de <strong>{weekStart.toLocaleDateString("pt-BR")}</strong>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => navWeek(1)}><ChevronRight className="h-4 w-4" /></Button>
-        <Button variant="outline" size="sm" onClick={() => setWeekStart(startOfWeek(new Date()))}>Hoje</Button>
-      </div>
-
-      {/* Desktop */}
-      <div className="hidden md:grid grid-cols-[120px_1fr_1fr] gap-2">
-        <div />
-        <div className="text-center text-[10px] uppercase tracking-[.2em] text-[var(--accent-primary)] font-bold py-2">Manhã</div>
-        <div className="text-center text-[10px] uppercase tracking-[.2em] text-[var(--accent-primary)] font-bold py-2">Tarde</div>
-        {DIAS.map((dia, i) => (
-          <DayRow
-            key={i}
-            dia={dia}
-            idx={i}
-            cards={cards}
-            onRemove={remove}
-            onEdit={(c) => setEditing({ dia: i, turno: c.turno, card: c })}
-            onAdd={(turno) => setEditing({ dia: i, turno })}
-          />
-        ))}
-      </div>
-
-      {/* Mobile */}
-      <div className="md:hidden space-y-3">
-        {DIAS.map((dia, i) => (
-          <div key={i} className="rounded-md border border-[var(--border-light)] bg-[var(--bg-primary)] p-3">
-            <div className="font-bold mb-2 uppercase text-sm tracking-wider">{dia}</div>
-            {(["manha", "tarde"] as const).map((t) => (
-              <div key={t} className="mb-2">
-                <div className="text-[10px] uppercase text-[var(--accent-primary)] tracking-widest mb-1">
-                  {t === "manha" ? "Manhã" : "Tarde"}
-                </div>
-                <div className="rounded-md border border-[var(--border-light)] bg-[var(--bg-secondary)] p-2 space-y-2 min-h-[80px]">
-                  {cards.filter((c) => c.dia_semana === i && c.turno === t).map((c) => (
-                    <CardMini
-                      key={c.id}
-                      c={c}
-                      onRemove={() => remove(c.id)}
-                      onEdit={() => setEditing({ dia: i, turno: t, card: c })}
-                    />
-                  ))}
-                  <button
-                    className="text-xs text-[var(--text-secondary)] hover:text-[var(--accent-primary)] flex items-center gap-1"
-                    onClick={() => setEditing({ dia: i, turno: t })}
-                  >
-                    <Plus className="h-3 w-3" /> adicionar
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-
-      {editing && user && (
-        <CardModal
-          userId={user.id}
-          weekStart={ymd(weekStart)}
-          dia={editing.dia}
-          turno={editing.turno}
-          card={editing.card}
-          onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); load(); }}
-        />
-      )}
-    </div>
-  );
-}
-
-function DayRow({ dia, idx, cards, onAdd, onEdit, onRemove }: {
-  dia: string; idx: number; cards: QuadroCard[];
-  onAdd: (t: "manha" | "tarde") => void;
-  onEdit: (c: QuadroCard) => void;
-  onRemove: (id: string) => void;
-}) {
-  return (
-    <>
-      <div className="flex items-center font-bold uppercase text-sm tracking-wider px-2">{dia}</div>
-      {(["manha", "tarde"] as const).map((t) => (
-        <div key={t} className="rounded-md border border-[var(--border-light)] bg-[var(--bg-primary)] p-2 space-y-2 min-h-[120px]">
-          {cards.filter((c) => c.dia_semana === idx && c.turno === t).map((c) => (
-            <CardMini key={c.id} c={c} onRemove={() => onRemove(c.id)} onEdit={() => onEdit(c)} />
-          ))}
-          <button
-            className="text-xs text-[var(--text-secondary)] hover:text-[var(--accent-primary)] flex items-center gap-1"
-            onClick={() => onAdd(t)}
-          >
-            <Plus className="h-3 w-3" /> adicionar
-          </button>
-        </div>
-      ))}
-    </>
-  );
-}
-
-function CardMini({ c, onRemove, onEdit }: { c: QuadroCard; onRemove: () => void; onEdit: () => void }) {
-  return (
-    <div className={cn(
-      "group rounded-xl border border-white/5 bg-white/5 p-3",
-      "transition-all duration-300 hover:bg-white/10 hover:border-primary/50",
-      "hover:shadow-[0_0_20px_rgba(40,100,255,0.1)] hover:-translate-y-0.5",
-      "cursor-pointer"
-    )}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-baseline gap-2 min-w-0">
-          <div className="font-mono uppercase font-bold text-sm tracking-wide truncate">{c.retranca}</div>
-          {c.horario && <span className="text-[11px] text-[var(--accent-primary)] font-mono shrink-0">{c.horario}</span>}
-        </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-          <button
-            onClick={(e) => { e.stopPropagation(); onEdit(); }}
-            className="text-[var(--text-secondary)] hover:text-[var(--accent-primary)] p-1"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); onRemove(); }}
-            className="text-[var(--text-secondary)] hover:text-red-500 p-1"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-      {c.reporter && <div className="text-[11px] text-[var(--text-secondary)] truncate">Prod: {c.reporter}</div>}
-    </div>
-  );
-}
-
-function CardModal({ userId, weekStart, dia, turno, card, onClose, onSaved }: {
-  userId: string; weekStart: string; dia: number; turno: "manha" | "tarde";
-  card?: QuadroCard;
-  onClose: () => void; onSaved: () => void;
-}) {
-  const [retranca, setRetranca] = useState(card?.retranca ?? "");
-  const [horario, setHorario]   = useState(card?.horario  ?? "");
-  const [produtor, setProdutor] = useState(card?.reporter ?? "");
-  const [saving, setSaving]     = useState(false);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    const payload = {
-      semana_inicio: weekStart, dia_semana: dia, turno,
-      retranca: retranca.toUpperCase(),
-      horario: horario || null,
-      reporter: produtor || null,
-      autor_id: userId,
-    };
-
-    const { error } = card
-      ? await supabase.from("quadro_cards").update(payload).eq("id", card.id)
-      : await supabase.from("quadro_cards").insert(payload);
-
-    setSaving(false);
-    if (error) toast.error(error.message);
-    else { toast.success(card ? "Card atualizado" : "Card adicionado"); onSaved(); }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 bg-[var(--bg-secondary)]/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
-      onClick={onClose}
-    >
-      <form
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={submit}
-        className="rounded-lg border border-[var(--border-light)] bg-[var(--bg-primary)] p-6 w-full max-w-md space-y-3 shadow-xl"
-      >
-        <h2 className="text-lg font-bold">
-          {card ? "Editar card" : "Novo card"} — {DIAS[dia]} / {turno === "manha" ? "Manhã" : "Tarde"}
-        </h2>
-        <div className="grid grid-cols-[1fr_120px] gap-3">
-          <div>
-            <Label>Retranca</Label>
-            <input
-              required
-              value={retranca}
-              onChange={(e) => setRetranca(e.target.value.toUpperCase())}
-              className={inputCls + " font-mono uppercase"}
-            />
-          </div>
-          <div>
-            <Label>Horário</Label>
-            <input
-              value={horario}
-              onChange={(e) => setHorario(e.target.value)}
-              placeholder="09:30"
-              className={inputCls + " font-mono"}
-            />
-          </div>
-        </div>
-        <div>
-          <Label>Produtor</Label>
-          <input value={produtor} onChange={(e) => setProdutor(e.target.value)} className={inputCls} />
-        </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button type="submit" disabled={saving}>{saving ? "..." : (card ? "Salvar" : "Adicionar")}</Button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-/* ========================= HELPERS / STYLES ========================= */
-
-const inputCls = "w-full bg-[var(--bg-secondary)] border border-[var(--border-light)] rounded-md px-3 py-2 text-sm outline-none focus:border-[var(--accent-primary)] transition-colors";
-const labelCls = "text-[10px] uppercase tracking-[.18em] text-[var(--accent-primary)] font-bold mb-1 block";
-
-function Label({ children }: { children: React.ReactNode }) {
-  return <label className={labelCls}>{children}</label>;
-}
-
-const Block: React.FC<{ n: string; title: string; children: React.ReactNode; action?: React.ReactNode }> = ({ n, title, children, action }) => (
-  <div className="bg-[var(--bg-overlay)] rounded-2xl border border-white/5 p-6 relative overflow-hidden group">
-    <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-primary to-transparent opacity-60" />
-    <div className="flex items-center justify-between mb-5">
-      <div className="flex items-center gap-3">
-        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-[var(--accent-primary)] text-[10px] font-bold">
-          {n}
-        </span>
-        <div className="text-[10px] uppercase tracking-[.2em] text-[var(--accent-primary)] font-bold opacity-90">{title}</div>
-      </div>
-      {action}
-    </div>
-    <div className="relative z-10">{children}</div>
-  </div>
-);
-
-/* ========================= FORMULÁRIO DE PAUTA ========================= */
-
-function FormularioPauta({
-  initialPauta, initialDate, onEditingChange,
-}: {
-  initialPauta: Pauta | null;
-  initialDate: Date;
-  onEditingChange: (p: Pauta | null, d?: Date) => void;
-}) {
-  const user = null;
-  const [pautas, setPautas] = useState<Pauta[]>([]);
-  const [editing, setEditing] = useState<Pauta | null>(initialPauta);
-  const [date, setDate] = useState<Date>(initialDate);
-
-  useEffect(() => {
-    setEditing(initialPauta);
-    setDate(initialDate);
-  }, [initialPauta, initialDate]);
-
-  const remove = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!window.confirm("Deseja excluir esta pauta sem retranca?")) return;
-    const { error } = await supabase.from("pautas").delete().eq("id", id);
-    if (error) toast.error(error.message);
-    else { if (editing?.id === id) setEditing(null); load(); }
-  };
-
-  // FIX: useCallback para estabilizar referência
-  const load = useCallback(async () => {
-    const dStr = ymd(date);
-    const { data, error } = await supabase
-      .from("pautas")
-      .select("*")
-      .or(
-        `data_pauta.eq.${dStr},and(data_pauta.is.null,created_at.gte.${dStr}T00:00:00,created_at.lt.${dStr}T23:59:59)`
-      )
-      .order("created_at", { ascending: false });
-    if (error) toast.error(error.message);
-    else setPautas((data ?? []) as Pauta[]);
-  }, [date]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const novo = (): Pauta => ({
-    id: "", titulo: "", retranca: "", tipo: "VT", turno: "Manhã",
-    data_pauta: ymd(date), reporter: "", imagens: "", produtor: "",
-    horario: "", local: "", sonora: "", contato: "", proposta: "",
-    encaminhamento: "", observacoes: "", status: "sugestao",
-    criado_por: user?.id ?? "",
-  });
-  const create = async () => {
-    if (!user) return;
-    const { data, error } = await supabase.from("pautas").insert({
-      titulo: "Sem título",
-      retranca: "SEM TITULO",
-      tipo: "VT",
-      turno: "Manhã",
-      data_pauta: ymd(date),
-      criado_por: user.id,
-      status: "sugestao",
-    }).select().single();
-
-    if (error) toast.error(error.message);
-    else { setEditing(data as Pauta); onEditingChange(data as Pauta); load(); }
-  };
-
-  const isToday = ymd(date) === ymd(new Date());
-
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
-      <aside className="bg-[var(--bg-overlay)] rounded-2xl border border-white/10 p-5">
-        <div className="flex items-center justify-between mb-3 gap-2">
-          <span className="text-[10px] uppercase tracking-widest text-[var(--text-secondary)]">
-            {isToday ? "Pautas de hoje" : "Pautas do dia"}
-          </span>
-          <Button size="sm" onClick={create}>
-            <Plus className="h-3 w-3" /> Nova
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-2 mb-3">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm" className="flex-1 justify-start font-normal">
-                <CalendarIcon className="h-3.5 w-3.5 mr-2" />
-                {date.toLocaleDateString("pt-BR")}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar mode="single" selected={date} onSelect={(d) => d && setDate(d)} className={cn("p-3 pointer-events-auto")} />
-            </PopoverContent>
-          </Popover>
-          {!isToday && (
-            <Button variant="ghost" size="sm" onClick={() => setDate(new Date())}>Hoje</Button>
-          )}
-        </div>
-
-        <div className="space-y-1 max-h-[60vh] overflow-y-auto">
-          {pautas.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => { setEditing(p); onEditingChange(p); }}
-              className={cn(
-                "w-full text-left p-2 rounded-md border text-sm transition-colors",
-                editing?.id === p.id
-                  ? "border-[var(--accent-primary)] bg-[var(--accent-primary)]/10"
-                  : "border-[var(--border-light)] hover:border-[var(--accent-primary)]/40 bg-[var(--bg-secondary)]"
-              )}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="font-mono uppercase text-xs text-[var(--accent-primary)] truncate">
-                  {p.retranca || "(sem retranca)"}
-                </div>
-                {!p.retranca && (
-                  <button
-                    onClick={(e) => remove(p.id, e)}
-                    className="p-1 rounded hover:bg-red-500/10 text-[var(--text-secondary)]/40 hover:text-red-500 transition-colors"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                )}
-              </div>
-              <div className="text-xs text-[var(--text-secondary)] truncate">{p.titulo}</div>
-            </button>
-          ))}
-          {!pautas.length && (
-            <div className="text-xs text-[var(--text-secondary)] p-2 italic">Nenhuma pauta neste dia.</div>
-          )}
-        </div>
-      </aside>
-
-      <section>
-        {editing
-          ? <PautaForm key={editing.id || "new"} initial={editing} userId={user?.id ?? ""} onSaved={load} />
-          : (
-            <div className="rounded-lg border border-[var(--border-light)] bg-[var(--bg-primary)] p-10 text-center text-[var(--text-secondary)]">
-              Selecione uma pauta ou crie uma nova.
-            </div>
-          )
-        }
-      </section>
-    </div>
-  );
-}
-
-/* ========================= PAUTA FORM ========================= */
-
-// FIX: tipo explícito para evitar erros silenciosos
-interface FonteItem { id: number; sonora: string; contato: string; }
-
-function parseFontes(sonora: string | null): FonteItem[] {
-  if (!sonora) return [{ id: Date.now(), sonora: "", contato: "" }];
-  if (sonora.startsWith("[")) {
-    try {
-      const parsed = JSON.parse(sonora);
-      if (Array.isArray(parsed)) return parsed;
-    } catch { /* fallthrough */ }
-  }
-  return [{ id: Date.now(), sonora, contato: "" }];
-}
-
-function PautaForm({ initial, userId, onSaved }: { initial: Pauta; userId: string; onSaved: () => void }) {
-  const [p, setP] = useState<Pauta>(initial);
-  const [fontes, setFontes] = useState<FonteItem[]>(() => parseFontes(initial.sonora));
-  const [saving, setSaving] = useState(false);
-
-  // FIX: referência estável para fontes no autosave — evita re-render em loop
-  const fontesRef = useRef(fontes);
-  useEffect(() => { fontesRef.current = fontes; }, [fontes]);
-
-  // Autosave local de rascunho
-  useEffect(() => {
-    if (p.retranca) {
-      localStorage.setItem(
-        `pauta_draft_${p.id || "new"}`,
-        JSON.stringify({ p, fontes: fontesRef.current, ts: Date.now() })
-      );
-    }
-    // FIX: fontes não está nas deps — usamos ref para não triggerar a cada keystroke nas fontes
-  }, [p]);
-
-  const set = <K extends keyof Pauta>(k: K, v: Pauta[K]) => setP((s) => ({ ...s, [k]: v }));
-
-  const handleAddFonte = () => {
-    setFontes((prev) => [...prev, { id: Date.now(), sonora: "", contato: "" }]);
-  };
-
-  const handleUpdateFonte = (id: number, field: "sonora" | "contato", value: string) => {
-    setFontes((prev) => prev.map((f) => f.id === id ? { ...f, [field]: value } : f));
-  };
-
-  const handleRemoveFonte = (id: number) => {
-    if (fontes.length > 1 && window.confirm("Remover esta fonte?")) {
-      setFontes((prev) => prev.filter((f) => f.id !== id));
-    }
-  };
-
-  const save = async () => {
-    if (!p.retranca?.trim()) { toast.error("Informe a retranca"); return; }
-    setSaving(true);
-
-    const sanitizedFontes = fontes.map((f) => ({
-      ...f,
-      sonora: sanitize(f.sonora),
-      contato: sanitize(f.contato),
-    }));
-
-    const payload = {
-      titulo: sanitize(p.titulo || p.retranca || ""),
-      retranca: sanitize(p.retranca || ""),
-      tipo: p.tipo,
-      turno: p.turno,
-      data_pauta: p.data_pauta || null,
-      reporter: p.reporter,
-      imagens: p.imagens,
-      produtor: p.produtor,
-      horario: p.horario,
-      local: p.local,
-      sonora: JSON.stringify(sanitizedFontes),
-      contato: "",
-      proposta: sanitize(p.proposta || ""),
-      encaminhamento: sanitize(p.encaminhamento || ""),
-      observacoes: sanitize(p.observacoes || ""),
-    };
-
-    if (p.id) {
-      const { error } = await supabase.from("pautas").update(payload).eq("id", p.id);
-      setSaving(false);
-      if (error) toast.error(error.message);
-      else { toast.success("Pauta salva"); onSaved(); }
-    } else {
-      const { data, error } = await supabase.from("pautas").insert({ ...payload, criado_por: userId }).select().single();
-      setSaving(false);
-      if (error) toast.error(error.message);
-      else { toast.success("Pauta criada"); setP(data as Pauta); onSaved(); }
-    }
-  };
-
-  const gerarPDF = () => window.print();
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-2 justify-end">
-        <Button variant="outline" onClick={gerarPDF}><Printer className="h-4 w-4" /> Gerar PDF</Button>
-        <Button onClick={save} disabled={saving}>{saving ? "Salvando..." : "Salvar Pauta"}</Button>
-      </div>
-
-      <Block n="1" title="Identificação">
-        <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_1fr] gap-3">
-          <div>
-            <Label>Retranca</Label>
-            <input
-              className={inputCls + " font-mono uppercase font-bold"}
-              value={p.retranca ?? ""}
-              onChange={(e) => set("retranca", e.target.value.toUpperCase())}
-              placeholder="EX: TRÂNSITO CENTRO"
-            />
-          </div>
-          <div>
-            <Label>Tipo</Label>
-            <select className={inputCls} value={p.tipo ?? "VT"} onChange={(e) => set("tipo", e.target.value)}>
-              {TIPOS.map((t) => <option key={t}>{t}</option>)}
-            </select>
-          </div>
-          <div>
-            <Label>Data</Label>
-            <input
-              type="date"
-              className={inputCls}
-              value={p.data_pauta ?? ""}
-              onChange={(e) => set("data_pauta", e.target.value)}
-            />
-          </div>
-          <div>
-            <Label>Turno</Label>
-            <select className={inputCls} value={p.turno ?? "Manhã"} onChange={(e) => set("turno", e.target.value)}>
-              {TURNOS.map((t) => <option key={t}>{t}</option>)}
-            </select>
-          </div>
-        </div>
-      </Block>
-
-      <Block n="2" title="Equipe Técnica">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div><Label>Repórter</Label><input className={inputCls} value={p.reporter ?? ""} onChange={(e) => set("reporter", e.target.value)} /></div>
-          <div><Label>Imagens</Label><input className={inputCls} value={p.imagens ?? ""} onChange={(e) => set("imagens", e.target.value)} /></div>
-          <div><Label>Produtor</Label><input className={inputCls} value={p.produtor ?? ""} onChange={(e) => set("produtor", e.target.value)} /></div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-[180px_1fr] gap-3 mt-3">
-          <div>
-            <Label><Clock className="inline h-3 w-3" /> Horário</Label>
-            <input
-              className={inputCls + " font-mono"}
-              placeholder="09:30"
-              value={p.horario ?? ""}
-              onChange={(e) => set("horario", e.target.value)}
-            />
-          </div>
-          <div>
-            <Label>Local de gravação</Label>
-            <input className={inputCls} value={p.local ?? ""} onChange={(e) => set("local", e.target.value)} />
-          </div>
-        </div>
-      </Block>
-
-      <Block
-        n="3"
-        title="Dados da Fonte"
-        action={
-          <button
-            type="button"
-            onClick={handleAddFonte}
-            className="flex items-center gap-1 bg-zinc-900 hover:bg-zinc-800 text-gray-300 hover:text-white px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors border border-zinc-800"
-          >
-            <Plus className="h-3 w-3" /> Adicionar Fonte
-          </button>
-        }
-      >
-        <div className="space-y-6">
-          {fontes.map((fonte, index) => (
-            <div key={fonte.id} className="space-y-4 pt-2 relative group border-b border-white/5 pb-6 last:border-0 last:pb-0">
-              {fontes.length > 1 && (
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-semibold">
-                    Fonte #{index + 1}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveFonte(fonte.id)}
-                    className="text-[var(--accent-primary)] hover:text-red-400 text-[10px] uppercase tracking-wider opacity-60 group-hover:opacity-100 transition-opacity"
-                  >
-                    Remover
-                  </button>
-                </div>
-              )}
-              <div>
-                <Label>Sonora — Nome e Cargo</Label>
-                <input
-                  className="w-full bg-zinc-900/40 text-sm text-gray-200 px-3 py-2 rounded border border-zinc-800 focus:border-primary/50 focus:outline-none placeholder-zinc-700 transition-colors uppercase font-medium"
-                  value={fonte.sonora}
-                  onChange={(e) => handleUpdateFonte(fonte.id, "sonora", e.target.value)}
-                  placeholder="Digite o nome e cargo da sonora..."
-                />
-              </div>
-              <div className="mt-3">
-                <Label>Contato e Instruções</Label>
-                <textarea
-                  rows={2}
-                  className="w-full bg-zinc-900/40 text-sm text-gray-200 px-3 py-2 rounded border border-zinc-800 focus:border-primary/50 focus:outline-none placeholder-zinc-700 transition-colors font-medium"
-                  value={fonte.contato}
-                  onChange={(e) => handleUpdateFonte(fonte.id, "contato", e.target.value)}
-                  placeholder="Telefone, instruções de acesso, etc."
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      </Block>
-
-      <Block n="4" title="Conteúdo">
-        <div><Label>Proposta</Label><textarea rows={3} className={inputCls} value={p.proposta ?? ""} onChange={(e) => set("proposta", e.target.value)} /></div>
-        <div className="mt-3"><Label>Encaminhamento / Roteiro</Label><textarea rows={6} className={inputCls} value={p.encaminhamento ?? ""} onChange={(e) => set("encaminhamento", e.target.value)} /></div>
-        <div className="mt-3"><Label>Sugestão de imagens / Observações</Label><textarea rows={3} className={inputCls} value={p.observacoes ?? ""} onChange={(e) => set("observacoes", e.target.value)} /></div>
-      </Block>
-
-      {/* Versão impressa */}
-      <div className="dn-print" style={{ display: "none" }}>
-        <div style={{ borderBottom: "3px solid #b8860b", paddingBottom: 12, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: "bold" }}>DeskNews · Pauta</h1>
-          <div style={{ fontSize: 11, color: "#666" }}>Gerado em: {new Date().toLocaleString("pt-BR")}</div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          <div style={{ marginBottom: 20, border: "1px solid #eee", padding: 12, borderRadius: 4 }}>
-            <div style={{ fontSize: 10, color: "#b8860b", fontWeight: "bold", textTransform: "uppercase", marginBottom: 8, letterSpacing: "0.1em" }}>1. Identificação</div>
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 15 }}>
-              <div><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase" }}>Retranca</div><div style={{ fontSize: 14, fontWeight: "bold" }}>{p.retranca || "—"}</div></div>
-              <div><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase" }}>Tipo</div><div style={{ fontSize: 12 }}>{p.tipo || "—"}</div></div>
-              <div><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase" }}>Data</div><div style={{ fontSize: 12 }}>{p.data_pauta ? new Date(p.data_pauta + "T00:00:00").toLocaleDateString("pt-BR") : "—"}</div></div>
-              <div><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase" }}>Turno</div><div style={{ fontSize: 12 }}>{p.turno || "—"}</div></div>
-            </div>
-          </div>
-          <div style={{ marginBottom: 20, border: "1px solid #eee", padding: 12, borderRadius: 4 }}>
-            <div style={{ fontSize: 10, color: "#b8860b", fontWeight: "bold", textTransform: "uppercase", marginBottom: 8, letterSpacing: "0.1em" }}>2. Equipe Técnica</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 15, marginBottom: 12 }}>
-              <div><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase" }}>Repórter</div><div style={{ fontSize: 12 }}>{p.reporter || "—"}</div></div>
-              <div><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase" }}>Imagens</div><div style={{ fontSize: 12 }}>{p.imagens || "—"}</div></div>
-              <div><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase" }}>Produtor</div><div style={{ fontSize: 12 }}>{p.produtor || "—"}</div></div>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 15 }}>
-              <div><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase" }}>Horário</div><div style={{ fontSize: 12, fontWeight: "bold" }}>{p.horario || "—"}</div></div>
-              <div><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase" }}>Local de gravação</div><div style={{ fontSize: 12 }}>{p.local || "—"}</div></div>
-            </div>
-          </div>
-          <div style={{ marginBottom: 20, border: "1px solid #eee", padding: 12, borderRadius: 4 }}>
-            <div style={{ fontSize: 10, color: "#b8860b", fontWeight: "bold", textTransform: "uppercase", marginBottom: 8, letterSpacing: "0.1em" }}>3. Dados da Fonte</div>
-            {fontes.map((f, i) => (
-              <div key={i} style={{ marginBottom: i === fontes.length - 1 ? 0 : 15, borderBottom: i === fontes.length - 1 ? "none" : "1px dashed #eee", paddingBottom: i === fontes.length - 1 ? 0 : 10 }}>
-                <div style={{ marginBottom: 5 }}><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase" }}>Sonora — nome e cargo</div><div style={{ fontSize: 12, fontWeight: "bold" }}>{f.sonora || "—"}</div></div>
-                <div><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase" }}>Contato e instruções</div><div style={{ fontSize: 12 }}>{f.contato || "—"}</div></div>
-              </div>
-            ))}
-          </div>
-          <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 4 }}>
-            <div style={{ fontSize: 10, color: "#b8860b", fontWeight: "bold", textTransform: "uppercase", marginBottom: 8, letterSpacing: "0.1em" }}>4. Conteúdo</div>
-            <div style={{ marginBottom: 15 }}><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase", marginBottom: 4 }}>Proposta</div><div style={{ fontSize: 12, whiteSpace: "pre-wrap", lineHeight: "1.4" }}>{p.proposta || "—"}</div></div>
-            <div style={{ marginBottom: 15 }}><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase", marginBottom: 4 }}>Encaminhamento / Roteiro</div><div style={{ fontSize: 12, whiteSpace: "pre-wrap", lineHeight: "1.4" }}>{p.encaminhamento || "—"}</div></div>
-            <div><div style={{ fontSize: 9, color: "#999", textTransform: "uppercase", marginBottom: 4 }}>Sugestão de imagens / Observações</div><div style={{ fontSize: 12, whiteSpace: "pre-wrap", lineHeight: "1.4" }}>{p.observacoes || "—"}</div></div>
-          </div>
-        </div>
-      </div>
-      <style dangerouslySetInnerHTML={{ __html: `
-        @media print {
-          body * { visibility:hidden !important; }
-          .dn-print, .dn-print * { visibility:visible !important; }
-          .dn-print { display:block !important; position:absolute; left:0; top:0; width:100%; background:#fff !important; color:#000 !important; padding:20px; }
-        }
-      ` }} />
-    </div>
-  );
-}
-
-/* ========================= PESQUISA DE PAUTAS ========================= */
-
-function SearchPautas({ onEdit }: { onEdit: (p: Pauta) => void }) {
-  const [q, setQ]           = useState("");
-  const [from, setFrom]     = useState<Date | undefined>();
-  const [to, setTo]         = useState<Date | undefined>();
-  const [results, setResults] = useState<Pauta[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [open, setOpen]     = useState<Pauta | null>(null);
-
-  // FIX: useCallback para evitar recriação e poder usar nas deps do useEffect
-  const search = useCallback(async () => {
-    setLoading(true);
-    let query = supabase
-      .from("pautas")
-      .select("*")
-      .order("data_pauta", { ascending: false, nullsFirst: false })
-      .limit(200);
-
-    if (q.trim()) {
-      const sanitizedTerm = q.trim().replace(/[,()]/g, "");
-      const term = `%${sanitizedTerm}%`;
-      query = query.or(
-        `retranca.ilike.${term},titulo.ilike.${term},reporter.ilike.${term},produtor.ilike.${term},proposta.ilike.${term},encaminhamento.ilike.${term}`
-      );
-    }
-    if (from) query = query.gte("data_pauta", ymd(from));
-    if (to)   query = query.lte("data_pauta", ymd(to));
-
-    const { data, error } = await query;
     setLoading(false);
-    if (error) toast.error(error.message);
-    else setResults((data ?? []) as Pauta[]);
-  }, [q, from, to]);
-
-  // FIX: deps explícitas — busca inicial sem dependência oculta
-  useEffect(() => { search(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const clearFilters = () => {
-    setQ("");
-    setFrom(undefined);
-    setTo(undefined);
-  };
-  // Busca reativa ao limpar filtros
-  useEffect(() => {
-    if (!q && !from && !to) search();
-  }, [q, from, to, search]);
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-[var(--border-light)] bg-[var(--bg-primary)] p-4 space-y-3">
-        <div className="text-[10px] uppercase tracking-[.2em] text-[var(--accent-primary)] font-bold">
-          Pesquisa Geral de Reportagens
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_180px_180px_auto] gap-2">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--text-secondary)]" />
-            <input
-              className={inputCls + " pl-9"}
-              placeholder="Buscar por retranca, produtor, repórter..."
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && search()}
-            />
-          </div>
-          <DateField label="De" value={from} onChange={setFrom} />
-          <DateField label="Até" value={to} onChange={setTo} />
-          <Button onClick={search} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Buscar
-          </Button>
-        </div>
-        {(q || from || to) && (
-          <button
-            className="text-xs text-[var(--text-secondary)] hover:text-[var(--accent-primary)]"
-            onClick={clearFilters}
-          >
-            limpar filtros
-          </button>
-        )}
-      </div>
-
-      <div className="rounded-lg border border-[var(--border-light)] bg-[var(--bg-primary)] overflow-hidden">
-        <div className="px-4 py-2 border-b border-[var(--border-light)] text-xs text-[var(--text-secondary)]">
-          {results.length} resultado(s)
-        </div>
-        <div className="divide-y divide-border max-h-[60vh] overflow-y-auto">
-          {results.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => setOpen(p)}
-              className="w-full text-left p-3 hover:bg-[var(--accent-primary)]/5 transition-colors"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-mono uppercase font-bold text-sm text-[var(--accent-primary)] truncate">
-                    {p.retranca || "(sem retranca)"}
-                  </div>
-                  <div className="text-sm truncate">{p.titulo}</div>
-                  <div className="text-xs text-[var(--text-secondary)] truncate">
-                    Prod: {p.produtor ?? "—"} · Rep: {p.reporter ?? "—"}{p.tipo ? ` · ${p.tipo}` : ""}
-                  </div>
-                </div>
-                <div className="text-xs font-mono text-[var(--text-secondary)] shrink-0">
-                  {p.data_pauta ? new Date(p.data_pauta + "T00:00:00").toLocaleDateString("pt-BR") : "—"}
-                </div>
-              </div>
-            </button>
-          ))}
-          {!results.length && !loading && (
-            <div className="p-8 text-center text-sm text-[var(--text-secondary)] italic">
-              Nenhuma pauta encontrada.
-            </div>
-          )}
-        </div>
-      </div>
-
-      {open && <PautaPreviewModal pauta={open} onClose={() => setOpen(null)} onEdit={onEdit} />}
-    </div>
-  );
-}
-
-/* ========================= MODAIS ========================= */
-
-function PautaPreviewModal({ pauta, onClose, onEdit }: { pauta: Pauta; onClose: () => void; onEdit: (p: Pauta) => void }) {
-  // FIX: parseFontes reutilizado em vez de lógica duplicada aqui
-  const dynamicFontes = useMemo(() => {
-    if (pauta.sonora?.startsWith("[")) {
-      try { return JSON.parse(pauta.sonora) as FonteItem[]; } catch { /* fallthrough */ }
-    }
-    return null;
-  }, [pauta.sonora]);
-
-  const rows: [string, string | null | undefined][] = [
-    ["Tipo", pauta.tipo], ["Data", pauta.data_pauta], ["Turno", pauta.turno],
-    ["Repórter", pauta.reporter], ["Imagens", pauta.imagens], ["Produtor", pauta.produtor],
-    ["Horário", pauta.horario], ["Local", pauta.local],
-    ...(dynamicFontes ? [] : [["Sonora", pauta.sonora], ["Contato", pauta.contato]] as [string, string | null | undefined][]),
-    ["Proposta", pauta.proposta], ["Encaminhamento", pauta.encaminhamento], ["Observações", pauta.observacoes],
-  ];
-
-  return (
-    <div
-      className="fixed inset-0 bg-[var(--bg-secondary)]/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="rounded-lg border border-[var(--border-light)] bg-[var(--bg-primary)] p-6 w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-xl"
-      >
-        <div className="flex items-start justify-between mb-4 gap-3">
-          <div>
-            <div className="font-mono uppercase font-bold text-lg text-[var(--accent-primary)]">{pauta.retranca}</div>
-            <div className="text-sm text-[var(--text-secondary)]">{pauta.titulo}</div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => onEdit(pauta)} className="gap-1.5">
-              <Pencil className="h-3.5 w-3.5" /> Editar
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onClose}>Fechar</Button>
-          </div>
-        </div>
-        <div className="space-y-2">
-          {rows.map(([k, v]) => v ? (
-            <div key={k} className="border-b border-[var(--border-light)] pb-2">
-              <div className="text-[10px] uppercase tracking-widest text-[var(--accent-primary)] font-bold">{k}</div>
-              <div className="text-sm whitespace-pre-wrap">{v}</div>
-            </div>
-          ) : null)}
-          {dynamicFontes?.map((f, i) => (
-            <div key={i} className="border-b border-[var(--border-light)] pb-2 last:border-0">
-              <div className="text-[10px] uppercase tracking-widest text-[var(--accent-primary)] font-bold">Fonte #{i + 1}</div>
-              <div className="flex flex-col gap-1">
-                <div className="text-sm font-semibold text-[var(--accent-primary)]">{f.sonora || "—"}</div>
-                <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap">{f.contato || "—"}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DateField({ label, value, onChange }: { label: string; value?: Date; onChange: (d: Date | undefined) => void }) {
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="outline" className="justify-start font-normal h-9">
-          <CalendarIcon className="h-3.5 w-3.5 mr-2" />
-          <span className="text-xs uppercase tracking-wider text-[var(--text-secondary)] mr-2">{label}</span>
-          {value ? value.toLocaleDateString("pt-BR") : "—"}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
-        <Calendar mode="single" selected={value} onSelect={onChange} className={cn("p-3 pointer-events-auto")} />
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-/* ========================= AVISOS ========================= */
-
-function AvisosPanel() {
-  const user = null;
-  const [items, setItems]   = useState<Aviso[]>([]);
-  const [assunto, setAssunto] = useState("");
-  const [data, setData]     = useState<Date>(new Date());
-  const [saving, setSaving] = useState(false);
-
-  const load = useCallback(async () => {
-    const { data: rows, error } = await supabase
-      .from("avisos")
-      .select("*")
-      .order("data", { ascending: false })
-      .limit(200);
-    if (error) toast.error(error.message);
-    else setItems((rows ?? []) as Aviso[]);
-  }, []);
+  }, [semanaStr]);
 
   useEffect(() => { load(); }, [load]);
 
-  const add = async (e: React.FormEvent) => {
+  const mudarSemana = (delta: number) => {
+    const nova = new Date(semanaInicio);
+    nova.setDate(nova.getDate() + delta * 7);
+    setSemanaInicio(nova);
+  };
+
+  const abrirNovoCard = (dia: number, turno: "manha" | "tarde") => {
+    setNovoCard({ dia, turno });
+    setRetranca(""); setReporter(""); setHorario("");
+  };
+
+  const salvarCard = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!assunto.trim() || !user) return;
+    if (!novoCard || !sanitize(retranca)) return toast.error("Informe a retranca.");
     setSaving(true);
-    const { error } = await supabase.from("avisos").insert({
-      assunto: assunto.trim(),
-      data: ymd(data),
-      autor_id: user.id,
+    const ordemAtual = cards.filter((c) => c.dia_semana === novoCard.dia && c.turno === novoCard.turno).length;
+    const { error } = await supabase.from("quadro_cards").insert({
+      semana_inicio: semanaStr,
+      dia_semana: novoCard.dia,
+      turno: novoCard.turno,
+      retranca: sanitize(retranca),
+      reporter: reporter ? sanitize(reporter) : null,
+      horario: horario || null,
+      ordem: ordemAtual,
+      // TODO: quando o login voltar, trocar null por supabase.auth.getUser() -> user.id
+      autor_id: null,
     });
     setSaving(false);
     if (error) toast.error(error.message);
-    else { setAssunto(""); toast.success("Aviso adicionado"); load(); }
-  };
-
-  const remove = async (id: string) => {
-    const { error } = await supabase.from("avisos").delete().eq("id", id);
-    if (error) toast.error(error.message);
-    else load();
-  };
-
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
-      <form onSubmit={add} className="rounded-lg border border-[var(--border-light)] border-l-4 border-l-accent bg-[var(--bg-primary)] p-4 space-y-3 h-fit">
-        <div className="text-[10px] uppercase tracking-[.2em] text-[var(--accent-primary)] font-bold flex items-center gap-2">
-          <Megaphone className="h-3.5 w-3.5" /> Novo aviso
-        </div>
-        <div>
-          <Label>Assunto</Label>
-          <textarea
-            required
-            rows={3}
-            className={inputCls}
-            value={assunto}
-            onChange={(e) => setAssunto(e.target.value)}
-            placeholder="Ex.: Reunião de pauta às 15h"
-          />
-        </div>
-        <div>
-          <Label>Data</Label>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button type="button" variant="outline" className="w-full justify-start font-normal">
-                <CalendarIcon className="h-3.5 w-3.5 mr-2" />
-                {data.toLocaleDateString("pt-BR")}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar mode="single" selected={data} onSelect={(d) => d && setData(d)} className={cn("p-3 pointer-events-auto")} />
-            </PopoverContent>
-          </Popover>
-        </div>
-        <Button type="submit" disabled={saving} className="w-full">
-          <Plus className="h-4 w-4" /> Publicar aviso
-        </Button>
-      </form>
-
-      <div className="rounded-lg border border-[var(--border-light)] bg-[var(--bg-primary)] overflow-hidden">
-        <div className="px-4 py-2 border-b border-[var(--border-light)] text-xs text-[var(--text-secondary)]">
-          {items.length} aviso(s)
-        </div>
-        <div className="divide-y divide-border max-h-[70vh] overflow-y-auto">
-          {items.map((a) => (
-            <div key={a.id} className="p-3 flex items-start justify-between gap-3 group">
-              <div className="min-w-0">
-                <div className="text-sm whitespace-pre-wrap">{a.assunto}</div>
-                <div className="text-xs font-mono text-[var(--accent-primary)] mt-1">
-                  {new Date(a.data + "T00:00:00").toLocaleDateString("pt-BR")}
-                </div>
-              </div>
-              {user?.id === a.autor_id && (
-                <button
-                  onClick={() => remove(a.id)}
-                  className="opacity-0 group-hover:opacity-100 text-[var(--text-secondary)] hover:text-red-500 transition-opacity"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-          ))}
-          {!items.length && (
-            <div className="p-8 text-center text-sm text-[var(--text-secondary)] italic">Nenhum aviso.</div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ========================= GAVETA DE VTs ========================= */
-
-function GavetaVTs() {
-  const user = null;
-  const [items, setItems]               = useState<VtGaveta[]>([]);
-  const [filterPrograma, setFilterPrograma] = useState<string>("Todos");
-  const [form, setForm]                 = useState({ programa: PROGRAMAS_VT[0] as string, retranca: "", data_pronto: ymd(new Date()), observacao: "" });
-  const [editingId, setEditingId]       = useState<string | null>(null);
-  const [previewItem, setPreviewItem]   = useState<VtGaveta | null>(null);
-  const [saving, setSaving]             = useState(false);
-
-  const load = useCallback(async () => {
-    const { data: rows, error } = await supabase
-      .from("vts_gaveta")
-      .select("*")
-      .order("data_pronto", { ascending: false })
-      .limit(300);
-    if (error) toast.error(error.message);
-    else setItems((rows ?? []) as VtGaveta[]);
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  const filtered = useMemo(
-    () => filterPrograma === "Todos" ? items : items.filter((i) => i.programa === filterPrograma),
-    [items, filterPrograma]
-  );
-
-  const add = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.retranca.trim() || !user) return;
-    setSaving(true);
-    const payload = {
-      programa: form.programa,
-      retranca: form.retranca.toUpperCase(),
-      data_pronto: form.data_pronto,
-      observacao: form.observacao || null,
-      autor_id: user.id,
-    };
-
-    const { error } = editingId
-      ? await supabase.from("vts_gaveta").update(payload).eq("id", editingId)
-      : await supabase.from("vts_gaveta").insert(payload);
-
-    setSaving(false);
-    if (error) toast.error(error.message);
     else {
-      setForm({ ...form, retranca: "", observacao: "" });
-      setEditingId(null);
-      toast.success(editingId ? "VT atualizado" : "VT arquivado na gaveta");
+      toast.success("Card adicionado!");
+      setNovoCard(null);
       load();
     }
   };
 
-  const remove = async (id: string) => {
-    if (!window.confirm("Remover este VT da gaveta?")) return;
-    const { error } = await supabase.from("vts_gaveta").delete().eq("id", id);
+  const handleDelete = async (id: string) => {
+    if (!confirm("Remover este card do quadro?")) return;
+    const { error } = await supabase.from("quadro_cards").delete().eq("id", id);
     if (error) toast.error(error.message);
-    else load();
+    else { toast.success("Card removido."); load(); }
   };
 
-  const startEdit = (v: VtGaveta) => {
-    setForm({ programa: v.programa, retranca: v.retranca, data_pronto: v.data_pronto, observacao: v.observacao || "" });
-    setEditingId(v.id);
-    setPreviewItem(null);
-  };
+  const cardsDe = (dia: number, turno: "manha" | "tarde") =>
+    cards.filter((c) => c.dia_semana === dia && c.turno === turno);
+
+  const fimSemana = new Date(semanaInicio);
+  fimSemana.setDate(fimSemana.getDate() + 6);
+
+  const inputCls = "w-full px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all font-mono";
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
-      <form onSubmit={add} className="rounded-lg border border-[var(--border-light)] border-l-4 border-l-accent bg-[var(--bg-primary)] p-4 space-y-3 h-fit">
-        <div className="text-[10px] uppercase tracking-[.2em] text-[var(--accent-primary)] font-bold flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Archive className="h-3.5 w-3.5" /> {editingId ? "Editar VT" : "Arquivar VT pronto"}
-          </div>
-          {editingId && (
-            <button
-              type="button"
-              onClick={() => { setEditingId(null); setForm({ ...form, retranca: "", observacao: "" }); }}
-              className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent-primary))]"
-            >
-              cancelar
-            </button>
-          )}
-        </div>
-        <div>
-          <Label>Programa</Label>
-          <select className={inputCls} value={form.programa} onChange={(e) => setForm({ ...form, programa: e.target.value })}>
-            {PROGRAMAS_VT.map((p) => <option key={p}>{p}</option>)}
-          </select>
-        </div>
-        <div>
-          <Label>Retranca do VT</Label>
-          <input
-            required
-            className={inputCls + " font-mono uppercase"}
-            value={form.retranca}
-            onChange={(e) => setForm({ ...form, retranca: e.target.value.toUpperCase() })}
-          />
-        </div>
-        <div>
-          <Label>Data em que ficou pronto</Label>
-          <input
-            type="date"
-            className={inputCls}
-            value={form.data_pronto}
-            onChange={(e) => setForm({ ...form, data_pronto: e.target.value })}
-          />
-        </div>
-        <div>
-          <Label>Observação (opcional)</Label>
-          <textarea
-            rows={2}
-            className={inputCls}
-            value={form.observacao}
-            onChange={(e) => setForm({ ...form, observacao: e.target.value })}
-          />
-        </div>
-        <Button type="submit" disabled={saving} className="w-full">
-          {editingId ? "Salvar alterações" : "Arquivar"}
-        </Button>
-      </form>
-
-      <div className="rounded-lg border border-[var(--border-light)] bg-[var(--bg-primary)] overflow-hidden">
-        <div className="px-4 py-2 border-b border-[var(--border-light)] flex items-center justify-between gap-2 flex-wrap">
-          <div className="text-xs text-[var(--text-secondary)]">{filtered.length} VT(s) na gaveta</div>
-          <select
-            className="bg-[var(--bg-secondary)] border border-[var(--border-light)] rounded-md px-2 py-1 text-xs"
-            value={filterPrograma}
-            onChange={(e) => setFilterPrograma(e.target.value)}
-          >
-            <option>Todos</option>
-            {PROGRAMAS_VT.map((p) => <option key={p}>{p}</option>)}
-          </select>
-        </div>
-        <div className="divide-y divide-border max-h-[70vh] overflow-y-auto">
-          {filtered.map((v) => (
-            <div
-              key={v.id}
-              onClick={() => setPreviewItem(v)}
-              className="p-3 group flex items-start justify-between gap-3 hover:bg-[var(--accent-primary)]/5 transition-colors cursor-pointer"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-mono uppercase font-bold text-sm text-[var(--accent-primary)]">{v.retranca}</span>
-                  <span className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-muted text-[var(--text-secondary)]">
-                    {v.programa}
-                  </span>
-                </div>
-                {v.observacao && (
-                  <div className="text-xs text-[var(--text-secondary)] mt-1 whitespace-pre-wrap">{v.observacao}</div>
-                )}
-                <div className="text-xs font-mono text-[var(--text-secondary)] mt-1">
-                  Pronto em {new Date(v.data_pronto + "T00:00:00").toLocaleDateString("pt-BR")}
-                </div>
-              </div>
-              {user?.id === v.autor_id && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); remove(v.id); }}
-                  className="opacity-0 group-hover:opacity-100 text-[var(--text-secondary)] hover:text-red-500 transition-opacity"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-          ))}
-          {!filtered.length && (
-            <div className="p-8 text-center text-sm text-[var(--text-secondary)] italic">Gaveta vazia.</div>
-          )}
-        </div>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-4 backdrop-blur-lg shadow-2xl">
+        <button onClick={() => mudarSemana(-1)} className="p-2 rounded-md text-slate-400 hover:bg-[#1a1a21] hover:text-[#22c55e] transition-all">
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <p className="text-xs sm:text-sm font-mono uppercase tracking-widest text-slate-300 font-bold">
+          {semanaInicio.toLocaleDateString("pt-BR")} — {fimSemana.toLocaleDateString("pt-BR")}
+        </p>
+        <button onClick={() => mudarSemana(1)} className="p-2 rounded-md text-slate-400 hover:bg-[#1a1a21] hover:text-[#22c55e] transition-all">
+          <ChevronRight className="h-5 w-5" />
+        </button>
       </div>
 
-      {previewItem && (
-        <VtPreviewModal vt={previewItem} onClose={() => setPreviewItem(null)} onEdit={startEdit} />
+      {loading ? (
+        <div className="text-center py-12 text-slate-500 italic font-mono text-xs">CARREGANDO...</div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-7 gap-3">
+          {DIAS_SEMANA.map((nomeDia, dia) => (
+            <div key={dia} className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-3 backdrop-blur-lg shadow-xl space-y-3">
+              <p className="text-xs font-mono uppercase tracking-widest text-slate-300 font-bold text-center pb-2 border-b border-[#22c55e]/10">
+                {nomeDia}
+              </p>
+
+              {(["manha", "tarde"] as const).map((turno) => (
+                <div key={turno} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono uppercase tracking-widest text-slate-600">
+                      {turno === "manha" ? "Manhã" : "Tarde"}
+                    </span>
+                    <button
+                      onClick={() => abrirNovoCard(dia, turno)}
+                      className="p-1 rounded text-slate-500 hover:bg-[#1a1a21] hover:text-[#22c55e] transition-all"
+                      title="Adicionar"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  {cardsDe(dia, turno).map((c) => (
+                    <div
+                      key={c.id}
+                      className="group bg-[#141416] border border-[#22c55e]/20 rounded-md p-2 hover:border-[#22c55e]/50 transition-all"
+                    >
+                      <div className="flex items-start justify-between gap-1">
+                        <p className="text-xs text-slate-100 font-mono font-bold leading-snug">{c.retranca}</p>
+                        <button
+                          onClick={() => handleDelete(c.id)}
+                          className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 transition-all shrink-0"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                      {(c.reporter || c.horario) && (
+                        <p className="text-[10px] text-slate-500 font-mono mt-1">
+                          {c.horario && <span className="inline-flex items-center gap-0.5"><Clock className="h-2.5 w-2.5" />{c.horario}</span>}
+                          {c.horario && c.reporter && <span> · </span>}
+                          {c.reporter}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+
+                  {novoCard?.dia === dia && novoCard?.turno === turno && (
+                    <form onSubmit={salvarCard} className="bg-[#141416] border border-[#22c55e]/40 rounded-md p-2 space-y-2">
+                      <input
+                        autoFocus
+                        value={retranca}
+                        onChange={(e) => setRetranca(e.target.value)}
+                        placeholder="RETRANCA"
+                        className="w-full px-2 py-1.5 rounded bg-[#09090b] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 text-[10px] focus:outline-none focus:border-[#22c55e] font-mono"
+                      />
+                      <input
+                        value={reporter}
+                        onChange={(e) => setReporter(e.target.value)}
+                        placeholder="REPÓRTER"
+                        className="w-full px-2 py-1.5 rounded bg-[#09090b] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 text-[10px] focus:outline-none focus:border-[#22c55e] font-mono"
+                      />
+                      <input
+                        type="time"
+                        value={horario}
+                        onChange={(e) => setHorario(e.target.value)}
+                        className="w-full px-2 py-1.5 rounded bg-[#09090b] border border-[#22c55e]/30 text-slate-100 text-[10px] focus:outline-none focus:border-[#22c55e] font-mono"
+                      />
+                      <div className="flex gap-1.5">
+                        <button
+                          type="submit"
+                          disabled={saving}
+                          className="flex-1 px-2 py-1 rounded bg-[#22c55e]/10 border border-[#22c55e] text-[#22c55e] text-[10px] font-mono uppercase font-bold hover:bg-[#22c55e]/20 transition-all disabled:opacity-50"
+                        >
+                          {saving ? "..." : "OK"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNovoCard(null)}
+                          className="px-2 py-1 rounded border border-[#22c55e]/20 text-slate-500 text-[10px] font-mono uppercase hover:text-slate-300 transition-all"
+                        >
+                          X
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
 }
 
-function VtPreviewModal({ vt, onClose, onEdit }: { vt: VtGaveta; onClose: () => void; onEdit: (v: VtGaveta) => void }) {
+function FormTab({ pautaToEdit, pautaDate, onSaved }: { pautaToEdit: Pauta | null; pautaDate: Date; onSaved: () => void }) {
+  const isEdit = !!pautaToEdit;
+
+  const [titulo, setTitulo] = useState(pautaToEdit?.titulo ?? "");
+  const [retranca, setRetranca] = useState(pautaToEdit?.retranca ?? "");
+  const [tipo, setTipo] = useState(pautaToEdit?.tipo ?? "");
+  const [turno, setTurno] = useState(pautaToEdit?.turno ?? "");
+  const [dataPauta, setDataPauta] = useState(pautaToEdit?.data_pauta ?? ymd(pautaDate));
+  const [reporter, setReporter] = useState(pautaToEdit?.reporter ?? "");
+  const [produtor, setProdutor] = useState(pautaToEdit?.produtor ?? "");
+  const [horario, setHorario] = useState(pautaToEdit?.horario ?? "");
+  const [local, setLocal] = useState(pautaToEdit?.local ?? "");
+  const [sonora, setSonora] = useState(pautaToEdit?.sonora ?? "");
+  const [contato, setContato] = useState(pautaToEdit?.contato ?? "");
+  const [proposta, setProposta] = useState(pautaToEdit?.proposta ?? "");
+  const [encaminhamento, setEncaminhamento] = useState(pautaToEdit?.encaminhamento ?? "");
+  const [observacoes, setObservacoes] = useState(pautaToEdit?.observacoes ?? "");
+  const [status, setStatus] = useState(pautaToEdit?.status ?? "sugestao");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setTitulo(pautaToEdit?.titulo ?? "");
+    setRetranca(pautaToEdit?.retranca ?? "");
+    setTipo(pautaToEdit?.tipo ?? "");
+    setTurno(pautaToEdit?.turno ?? "");
+    setDataPauta(pautaToEdit?.data_pauta ?? ymd(pautaDate));
+    setReporter(pautaToEdit?.reporter ?? "");
+    setProdutor(pautaToEdit?.produtor ?? "");
+    setHorario(pautaToEdit?.horario ?? "");
+    setLocal(pautaToEdit?.local ?? "");
+    setSonora(pautaToEdit?.sonora ?? "");
+    setContato(pautaToEdit?.contato ?? "");
+    setProposta(pautaToEdit?.proposta ?? "");
+    setEncaminhamento(pautaToEdit?.encaminhamento ?? "");
+    setObservacoes(pautaToEdit?.observacoes ?? "");
+    setStatus(pautaToEdit?.status ?? "sugestao");
+  }, [pautaToEdit, pautaDate]);
+
+  const resetForm = () => {
+    setTitulo(""); setRetranca(""); setTipo(""); setTurno("");
+    setDataPauta(ymd(pautaDate)); setReporter(""); setProdutor(""); setHorario("");
+    setLocal(""); setSonora(""); setContato(""); setProposta("");
+    setEncaminhamento(""); setObservacoes(""); setStatus("sugestao");
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sanitize(titulo)) return toast.error("Preencha o título da pauta.");
+
+    setSaving(true);
+    const payload = {
+      titulo: sanitize(titulo),
+      retranca: retranca ? sanitize(retranca) : null,
+      tipo: tipo || null,
+      turno: turno || null,
+      data_pauta: dataPauta || null,
+      reporter: reporter ? sanitize(reporter) : null,
+      produtor: produtor ? sanitize(produtor) : null,
+      horario: horario || null,
+      local: local ? sanitize(local) : null,
+      sonora: sonora ? sanitize(sonora) : null,
+      contato: contato ? sanitize(contato) : null,
+      proposta: proposta || null,
+      encaminhamento: encaminhamento || null,
+      observacoes: observacoes || null,
+      status,
+      // TODO: quando o login voltar, trocar null por supabase.auth.getUser() -> user.id
+      criado_por: pautaToEdit?.criado_por ?? null,
+    };
+
+    const query = isEdit
+      ? supabase.from("pautas").update(payload).eq("id", pautaToEdit!.id)
+      : supabase.from("pautas").insert(payload);
+
+    const { error } = await query;
+    setSaving(false);
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    toast.success(isEdit ? "Pauta atualizada!" : "Pauta criada!");
+    if (isEdit) onSaved();
+    else resetForm();
+  };
+
+  const inputCls = "w-full px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all font-mono";
+  const labelCls = "text-xs text-slate-600 font-mono uppercase tracking-widest block mb-2";
+
   return (
-    <div
-      className="fixed inset-0 bg-[var(--bg-secondary)]/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="bg-[var(--bg-primary)] border border-[var(--border-light)] rounded-lg max-w-2xl w-full max-h-[85vh] overflow-auto shadow-2xl"
-      >
-        <div className="px-6 py-4 border-b border-[var(--border-light)] flex items-start justify-between gap-4 sticky top-0 bg-[var(--bg-primary)]">
+    <form onSubmit={submit} className="space-y-6">
+      {/* Cabeçalho do Formulário */}
+      <div className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-6 backdrop-blur-lg shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
           <div>
-            <div className="text-[10px] uppercase tracking-widest text-[var(--accent-primary)] mb-1">Dados do VT Arquivado</div>
-            <h2 className="text-xl font-bold">{vt.retranca}</h2>
+            <p className="text-xs text-slate-500 font-mono uppercase tracking-widest mb-2">
+              {isEdit ? "EDITANDO PAUTA" : "NOVA PAUTA"}
+            </p>
+            <p className="text-sm text-slate-300 font-mono">
+              {isEdit ? "Atualize os dados da pauta existente" : "Preencha as informações da nova pauta"}
+            </p>
           </div>
-          <div className="flex items-center gap-3">
+          {isEdit && (
             <button
-              onClick={() => onEdit(vt)}
-              title="Editar VT"
-              className="p-1.5 rounded-md hover:bg-primary/10 text-[var(--text-secondary)] hover:text-[var(--accent-primary)] transition-all"
+              type="button"
+              onClick={() => onSaved()}
+              className="px-4 py-2 rounded-md text-xs font-mono uppercase text-slate-400 border border-slate-400/20 hover:border-slate-400/40 hover:text-slate-300 transition-all"
             >
-              <Pencil className="h-5 w-5" />
+              Cancelar
             </button>
-            <button
-              onClick={onClose}
-              className="text-[var(--text-secondary)] hover:text-[var(--accent-primary))] transition-colors p-1"
-              title="Fechar"
-            >
-              <Plus className="h-7 w-7 rotate-45" />
-            </button>
-          </div>
+          )}
         </div>
-        <div className="p-6 space-y-5 text-sm">
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <div className="border border-[var(--border-light)] rounded p-3">
-              <div className="text-[10px] uppercase tracking-widest text-[var(--text-secondary)]">Programa</div>
-              <div className="mt-1 font-bold text-sm uppercase">{vt.programa}</div>
-            </div>
-            <div className="border border-[var(--border-light)] rounded p-3">
-              <div className="text-[10px] uppercase tracking-widest text-[var(--text-secondary)]">Ficou pronto em</div>
-              <div className="mt-1 font-bold text-sm">
-                {new Date(vt.data_pronto + "T00:00:00").toLocaleDateString("pt-BR")}
-              </div>
-            </div>
-          </div>
+      </div>
+
+      {/* Seção Informações Básicas */}
+      <div className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-6 backdrop-blur-lg shadow-2xl">
+        <div className="flex items-center gap-2 mb-4 pb-4 border-b border-[#22c55e]/10">
+          <FileText className="h-4 w-4 text-[#22c55e]" />
+          <p className="text-xs text-slate-500 font-mono uppercase tracking-widest">
+            Informações Básicas
+          </p>
+        </div>
+        
+        <div className="space-y-4">
           <div>
-            <label className="text-[10px] uppercase tracking-widest text-[var(--text-secondary)] font-bold block mb-2">
-              Observações / Detalhes
-            </label>
-            <div className="bg-[var(--bg-secondary)]/30 border border-[var(--border-light)] rounded-md p-4 italic text-[var(--text-secondary)] whitespace-pre-wrap min-h-[100px]">
-              {vt.observacao || "Nenhuma observação registrada para este VT."}
+            <label className={labelCls}>Título *</label>
+            <input 
+              required 
+              value={titulo} 
+              onChange={(e) => setTitulo(e.target.value)} 
+              placeholder="Ex: Reportagem sobre obras na BR-101" 
+              className={inputCls} 
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className={labelCls}>Retranca</label>
+              <input 
+                value={retranca} 
+                onChange={(e) => setRetranca(e.target.value)} 
+                placeholder="Ex: OBRAS-BR101" 
+                className={inputCls} 
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Tipo</label>
+              <select 
+                value={tipo} 
+                onChange={(e) => setTipo(e.target.value)} 
+                className={inputCls + " appearance-none cursor-pointer"}
+              >
+                <option value="">Selecione</option>
+                {TIPOS.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Turno</label>
+              <select 
+                value={turno} 
+                onChange={(e) => setTurno(e.target.value)} 
+                className={inputCls + " appearance-none cursor-pointer"}
+              >
+                <option value="">Selecione</option>
+                {TURNOS.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Seção Data e Horário */}
+      <div className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-6 backdrop-blur-lg shadow-2xl">
+        <div className="flex items-center gap-2 mb-4 pb-4 border-b border-[#22c55e]/10">
+          <CalendarIcon className="h-4 w-4 text-[#22c55e]" />
+          <p className="text-xs text-slate-500 font-mono uppercase tracking-widest">
+            Data e Horário
+          </p>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className={labelCls}>Data</label>
+            <input 
+              type="date" 
+              value={dataPauta} 
+              onChange={(e) => setDataPauta(e.target.value)} 
+              className={inputCls} 
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Horário</label>
+            <input 
+              type="time" 
+              value={horario} 
+              onChange={(e) => setHorario(e.target.value)} 
+              className={inputCls} 
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Status</label>
+            <select 
+              value={status} 
+              onChange={(e) => setStatus(e.target.value)} 
+              className={inputCls + " appearance-none cursor-pointer"}
+            >
+              <option value="sugestao">Sugestão</option>
+              <option value="aprovada">Aprovada</option>
+              <option value="em_producao">Em Produção</option>
+              <option value="finalizada">Finalizada</option>
+              <option value="cancelada">Cancelada</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Seção Equipe */}
+      <div className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-6 backdrop-blur-lg shadow-2xl">
+        <div className="flex items-center gap-2 mb-4 pb-4 border-b border-[#22c55e]/10">
+          <Megaphone className="h-4 w-4 text-[#22c55e]" />
+          <p className="text-xs text-slate-500 font-mono uppercase tracking-widest">
+            Equipe
+          </p>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className={labelCls}>Repórter</label>
+            <input 
+              value={reporter} 
+              onChange={(e) => setReporter(e.target.value)} 
+              placeholder="Nome do repórter"
+              className={inputCls} 
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Produtor</label>
+            <input 
+              value={produtor} 
+              onChange={(e) => setProdutor(e.target.value)} 
+              placeholder="Nome do produtor"
+              className={inputCls} 
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Seção Localização e Contato */}
+      <div className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-6 backdrop-blur-lg shadow-2xl">
+        <div className="flex items-center gap-2 mb-4 pb-4 border-b border-[#22c55e]/10">
+          <MapPin className="h-4 w-4 text-[#22c55e]" />
+          <p className="text-xs text-slate-500 font-mono uppercase tracking-widest">
+            Localização e Contatos
+          </p>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className={labelCls}>Local</label>
+            <input 
+              value={local} 
+              onChange={(e) => setLocal(e.target.value)} 
+              placeholder="Ex: Av. Getúlio Vargas, 1000"
+              className={inputCls} 
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Contato</label>
+            <input 
+              value={contato} 
+              onChange={(e) => setContato(e.target.value)} 
+              placeholder="Nome / telefone"
+              className={inputCls} 
+            />
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <label className={labelCls}>Sonora</label>
+          <input 
+            value={sonora} 
+            onChange={(e) => setSonora(e.target.value)} 
+            placeholder="Quem vai dar sonora"
+            className={inputCls} 
+          />
+        </div>
+      </div>
+
+      {/* Seção Conteúdo e Detalhes */}
+      <div className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-6 backdrop-blur-lg shadow-2xl">
+        <div className="flex items-center gap-2 mb-4 pb-4 border-b border-[#22c55e]/10">
+          <Pencil className="h-4 w-4 text-[#22c55e]" />
+          <p className="text-xs text-slate-500 font-mono uppercase tracking-widest">
+            Conteúdo
+          </p>
+        </div>
+        
+        <div className="space-y-4">
+          <div>
+            <label className={labelCls}>Proposta</label>
+            <textarea 
+              value={proposta} 
+              onChange={(e) => setProposta(e.target.value)} 
+              placeholder="Descreva a proposta da pauta"
+              rows={3} 
+              className={inputCls + " resize-none leading-relaxed"} 
+            />
+          </div>
+
+          <div>
+            <label className={labelCls}>Encaminhamento</label>
+            <textarea 
+              value={encaminhamento} 
+              onChange={(e) => setEncaminhamento(e.target.value)} 
+              placeholder="Como a pauta será desenvolvida"
+              rows={3} 
+              className={inputCls + " resize-none leading-relaxed"} 
+            />
+          </div>
+
+          <div>
+            <label className={labelCls}>Observações</label>
+            <textarea 
+              value={observacoes} 
+              onChange={(e) => setObservacoes(e.target.value)} 
+              placeholder="Observações adicionais"
+              rows={2} 
+              className={inputCls + " resize-none leading-relaxed"} 
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Botões de Ação */}
+      <div className="flex justify-end gap-3 sticky bottom-0 bg-[#09090b] border-t border-[#22c55e]/20 -mx-6 px-6 py-4">
+        <Button
+          type="submit"
+          disabled={saving}
+          className="px-8 py-2.5 rounded-md text-xs font-mono uppercase font-black bg-[#22c55e]/10 border border-[#22c55e] text-[#22c55e] transition-all hover:bg-[#22c55e]/20 hover:shadow-lg hover:shadow-[#22c55e]/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <div className="flex items-center gap-2">
+            {saving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                SALVANDO...
+              </>
+            ) : isEdit ? (
+              <>
+                <Pencil className="h-4 w-4" />
+                ATUALIZAR
+              </>
+            ) : (
+              <>
+                <Plus className="h-4 w-4" />
+                SALVAR
+              </>
+            )}
+          </div>
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function SearchTab({ onEdit }: { onEdit: (p: Pauta) => void }) {
+  const [pautas, setPautas] = useState<Pauta[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [termo, setTermo] = useState("");
+  const [statusFiltro, setStatusFiltro] = useState("Todos");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    let query = supabase.from("pautas").select("*").order("data_pauta", { ascending: false });
+    if (statusFiltro !== "Todos") query = query.eq("status", statusFiltro);
+    const { data, error } = await query;
+    if (error) toast.error(error.message);
+    else setPautas((data ?? []) as Pauta[]);
+    setLoading(false);
+  }, [statusFiltro]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Excluir esta pauta?")) return;
+    const { error } = await supabase.from("pautas").delete().eq("id", id);
+    if (error) toast.error(error.message);
+    else { toast.success("Pauta excluída."); load(); }
+  };
+
+  const filtradas = useMemo(() => {
+    const t = sanitize(termo).toLowerCase();
+    if (!t) return pautas;
+    return pautas.filter((p) =>
+      p.titulo?.toLowerCase().includes(t) ||
+      p.retranca?.toLowerCase().includes(t) ||
+      p.reporter?.toLowerCase().includes(t)
+    );
+  }, [pautas, termo]);
+
+  return (
+    <div className="space-y-6">
+      <div className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-6 backdrop-blur-lg shadow-2xl">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="md:col-span-2 relative">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-600" />
+            <input
+              value={termo}
+              onChange={(e) => setTermo(e.target.value)}
+              placeholder="BUSCAR POR TÍTULO, RETRANCA OU REPÓRTER..."
+              className="w-full pl-9 pr-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all font-mono"
+            />
+          </div>
+          <select
+            value={statusFiltro}
+            onChange={(e) => setStatusFiltro(e.target.value)}
+            className="w-full px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all appearance-none cursor-pointer font-mono"
+          >
+            <option value="Todos">Todos os status</option>
+            <option value="sugestao">Sugestão</option>
+            <option value="aprovada">Aprovada</option>
+            <option value="em_producao">Em Produção</option>
+            <option value="finalizada">Finalizada</option>
+            <option value="cancelada">Cancelada</option>
+          </select>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-12 text-slate-500 italic font-mono text-xs">CARREGANDO...</div>
+      ) : filtradas.length === 0 ? (
+        <div className="bg-[#0f0f12] border border-dashed border-[#22c55e]/30 rounded-lg p-12 text-center text-slate-500 text-xs font-mono">
+          NENHUMA PAUTA ENCONTRADA
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3">
+          {filtradas.map((p) => (
+            <div
+              key={p.id}
+              className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-4 hover:bg-[#1a1a21] hover:border-[#22c55e]/40 transition-all group backdrop-blur-lg shadow-xl"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-3 flex-wrap mb-2">
+                    {p.status && (
+                      <span className="bg-[#22c55e]/20 text-[#22c55e] text-xs px-3 py-1 rounded-md border border-[#22c55e]/40 font-mono font-bold uppercase tracking-wider">
+                        {p.status.replace("_", " ")}
+                      </span>
+                    )}
+                    {p.tipo && <span className="text-xs text-slate-500 font-mono uppercase">{p.tipo}</span>}
+                    {p.data_pauta && (
+                      <span className="text-xs text-slate-500 flex items-center gap-1 font-mono">
+                        <CalendarIcon className="h-3 w-3" />
+                        {new Date(p.data_pauta + "T00:00:00").toLocaleDateString("pt-BR")}
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-sm font-black text-slate-100 font-mono uppercase truncate">{p.titulo}</h3>
+                  {(p.retranca || p.reporter) && (
+                    <p className="text-xs text-slate-500 font-mono mt-1">
+                      {p.retranca && <span>{p.retranca}</span>}
+                      {p.retranca && p.reporter && <span> · </span>}
+                      {p.reporter && <span>{p.reporter}</span>}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => onEdit(p)}
+                    className="p-2 rounded-md text-slate-500 hover:bg-[#1a1a21] hover:text-[#22c55e] transition-all"
+                    title="Editar"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(p.id)}
+                    className="p-2 rounded-md text-slate-500 hover:bg-[#1a1a21] hover:text-red-400 transition-all"
+                    title="Excluir"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-/* ========================= PORTAIS ========================= */
-
-function PortaisPanel() {
-  const user = null;
-  const fetchFn = useServerFn(fetchPortais);
-  const [feeds, setFeeds]   = useState<PortalFeed[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [active, setActive] = useState<string | null>(null);
+function AvisosTab() {
+  const [avisos, setAvisos] = useState<Aviso[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [assunto, setAssunto] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try {
-      const data = await fetchFn();
-      setFeeds(data);
-      if (!active && data.length) setActive(data[0].portal);
-    } catch {
-      toast.error("Falha ao buscar portais");
-    } finally {
-      setLoading(false);
-    }
-  }, [active, fetchFn]);
-
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const addAsPauta = async (item: PortalNews, portal: string) => {
-    if (!user) return;
-    const { error } = await supabase.from("pautas").insert({
-      titulo: item.title,
-      retranca: item.title.toUpperCase().slice(0, 50),
-      proposta: sanitize(item.description ?? ""),
-      local: portal,
-      sonora: item.link,
-      data_pauta: ymd(new Date()),
-      criado_por: user.id,
-      status: "sugestao",
-    });
+    const { data, error } = await supabase.from("avisos").select("*").order("data", { ascending: false });
     if (error) toast.error(error.message);
-    else toast.success("Sugestão adicionada");
+    else setAvisos((data ?? []) as Aviso[]);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sanitize(assunto)) return toast.error("Escreva o aviso.");
+    setSaving(true);
+    const { error } = await supabase.from("avisos").insert({
+      assunto: sanitize(assunto),
+      data: ymd(new Date()),
+      // TODO: quando o login voltar, trocar null por supabase.auth.getUser() -> user.id
+      autor_id: null,
+    });
+    setSaving(false);
+    if (error) toast.error(error.message);
+    else {
+      toast.success("Aviso publicado!");
+      setAssunto("");
+      load();
+    }
   };
 
-  const current = feeds.find((f) => f.portal === active);
+  const handleDelete = async (id: string) => {
+    if (!confirm("Excluir este aviso?")) return;
+    const { error } = await supabase.from("avisos").delete().eq("id", id);
+    if (error) toast.error(error.message);
+    else { toast.success("Aviso excluído."); load(); }
+  };
 
   return (
-    <div className="rounded-lg border border-[var(--border-light)] bg-[var(--bg-primary)] overflow-hidden">
-      <div className="flex items-center justify-between p-3 border-b border-[var(--border-light)]">
-        <div className="text-xs text-[var(--text-secondary)]">
-          {loading ? "Carregando…" : `${feeds.reduce((s, f) => s + f.items.length, 0)} notícias`}
+    <div className="space-y-6">
+      <form onSubmit={submit} className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-6 backdrop-blur-lg shadow-2xl">
+        <p className="text-xs text-slate-500 font-mono uppercase tracking-widest mb-4">Novo aviso</p>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <input
+            value={assunto}
+            onChange={(e) => setAssunto(e.target.value)}
+            placeholder="ESCREVA O AVISO PARA A REDAÇÃO..."
+            className="flex-1 px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all font-mono"
+          />
+          <Button
+            type="submit"
+            disabled={saving}
+            className="inline-flex items-center justify-center gap-2 px-6 py-2 rounded-md bg-[#22c55e]/10 border border-[#22c55e] text-white text-xs font-black uppercase tracking-wider transition-all hover:bg-[#22c55e]/20 hover:shadow-lg hover:shadow-[#22c55e]/20 active:scale-95 font-mono disabled:opacity-50"
+          >
+            <Megaphone className="h-4 w-4" /> {saving ? "PUBLICANDO..." : "PUBLICAR"}
+          </Button>
         </div>
-        <Button variant="outline" size="sm" onClick={load} disabled={loading}>
-          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />} Atualizar
-        </Button>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] min-h-[400px]">
-        <div className="border-r border-[var(--border-light)] p-2 space-y-1 max-h-[600px] overflow-y-auto">
-          {feeds.map((f) => (
-            <button
-              key={f.portal}
-              onClick={() => setActive(f.portal)}
-              className={cn(
-                "w-full text-left px-3 py-2 rounded text-sm flex items-center justify-between transition-colors",
-                active === f.portal ? "bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/40" : "hover:bg-muted"
-              )}
+      </form>
+
+      {loading ? (
+        <div className="text-center py-12 text-slate-500 italic font-mono text-xs">CARREGANDO...</div>
+      ) : avisos.length === 0 ? (
+        <div className="bg-[#0f0f12] border border-dashed border-[#22c55e]/30 rounded-lg p-12 text-center text-slate-500 text-xs font-mono">
+          SEM AVISOS
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3">
+          {avisos.map((a) => (
+            <div
+              key={a.id}
+              className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-4 hover:bg-[#1a1a21] hover:border-[#22c55e]/40 transition-all group backdrop-blur-lg shadow-xl flex items-start justify-between gap-3"
             >
-              <span className="truncate">{f.portal}</span>
-              <span className={cn("text-[10px] ml-2", f.error ? "text-destructive" : "text-[var(--text-secondary)]")}>
-                {f.error ? "erro" : f.items.length}
-              </span>
-            </button>
-          ))}
-        </div>
-        <div className="p-3 max-h-[600px] overflow-y-auto space-y-2">
-          {current?.items.map((it, i) => (
-            <div key={i} className="rounded-md border border-[var(--border-light)] border-l-2 border-l-accent bg-[var(--bg-secondary)] p-3">
-              <div className="text-sm font-medium">{it.title}</div>
-              {it.description && (
-                <p className="text-xs text-[var(--text-secondary)] mt-1 line-clamp-2">{it.description}</p>
-              )}
-              <div className="flex items-center justify-between mt-2 gap-2">
-                <div className="text-[10px] text-[var(--text-secondary)]">
-                  {it.pubDate ? new Date(it.pubDate).toLocaleString("pt-BR") : ""}
-                </div>
-                <div className="flex items-center gap-2">
-                  {it.link && (
-                    <a
-                      href={it.link.startsWith("http") ? it.link : "#"}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[11px] inline-flex items-center gap-1 text-[var(--accent-primary)] hover:underline"
-                    >
-                      <ExternalLink className="h-3 w-3" /> abrir
-                    </a>
-                  )}
-                  <Button size="sm" onClick={() => addAsPauta(it, current!.portal)}>
-                    <Plus className="h-3 w-3" /> usar
-                  </Button>
-                </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-slate-500 flex items-center gap-1 font-mono mb-1">
+                  <CalendarIcon className="h-3 w-3" />
+                  {new Date(a.data + "T00:00:00").toLocaleDateString("pt-BR")}
+                </p>
+                <p className="text-sm text-slate-100 font-mono">{a.assunto}</p>
               </div>
+              <button
+                onClick={() => handleDelete(a.id)}
+                className="p-2 rounded-md text-slate-500 hover:bg-[#1a1a21] hover:text-red-400 transition-all shrink-0"
+                title="Excluir"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
             </div>
           ))}
         </div>
-      </div>
+      )}
     </div>
   );
+}
+
+function GavetaTab() {
+  const [vts, setVts] = useState<VtGaveta[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [programaFiltro, setProgramaFiltro] = useState("Todos");
+
+  const [programa, setPrograma] = useState<string>(PROGRAMAS_VT[0]);
+  const [retranca, setRetranca] = useState("");
+  const [dataPronto, setDataPronto] = useState(ymd(new Date()));
+  const [observacao, setObservacao] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    let query = supabase.from("vt_gaveta").select("*").order("data_pronto", { ascending: false });
+    if (programaFiltro !== "Todos") query = query.eq("programa", programaFiltro);
+    const { data, error } = await query;
+    if (error) toast.error(error.message);
+    else setVts((data ?? []) as VtGaveta[]);
+    setLoading(false);
+  }, [programaFiltro]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sanitize(retranca)) return toast.error("Informe a retranca do VT.");
+    setSaving(true);
+    const { error } = await supabase.from("vt_gaveta").insert({
+      programa,
+      retranca: sanitize(retranca),
+      data_pronto: dataPronto,
+      observacao: observacao ? sanitize(observacao) : null,
+      // TODO: quando o login voltar, trocar null por supabase.auth.getUser() -> user.id
+      autor_id: null,
+    });
+    setSaving(false);
+    if (error) toast.error(error.message);
+    else {
+      toast.success("VT adicionado à gaveta!");
+      setRetranca(""); setObservacao(""); setDataPronto(ymd(new Date()));
+      load();
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Remover este VT da gaveta?")) return;
+    const { error } = await supabase.from("vt_gaveta").delete().eq("id", id);
+    if (error) toast.error(error.message);
+    else { toast.success("VT removido."); load(); }
+  };
+
+  const inputCls = "w-full px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 text-xs focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all font-mono";
+  const labelCls = "text-xs text-slate-600 font-mono uppercase tracking-widest block mb-2";
+
+  return (
+    <div className="space-y-6">
+      <form onSubmit={submit} className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-6 backdrop-blur-lg shadow-2xl">
+        <p className="text-xs text-slate-500 font-mono uppercase tracking-widest mb-4">Novo VT na gaveta</p>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+          <div>
+            <label className={labelCls}>Programa</label>
+            <select value={programa} onChange={(e) => setPrograma(e.target.value)} className={inputCls + " appearance-none cursor-pointer"}>
+              {PROGRAMAS_VT.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>Retranca</label>
+            <input value={retranca} onChange={(e) => setRetranca(e.target.value)} placeholder="Ex: ACIDENTE BR-101" className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>Pronto em</label>
+            <input type="date" value={dataPronto} onChange={(e) => setDataPronto(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>Observação</label>
+            <input value={observacao} onChange={(e) => setObservacao(e.target.value)} className={inputCls} />
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <Button
+            type="submit"
+            disabled={saving}
+            className="inline-flex items-center gap-2 px-6 py-2 rounded-md bg-[#22c55e]/10 border border-[#22c55e] text-white text-xs font-black uppercase tracking-wider transition-all hover:bg-[#22c55e]/20 hover:shadow-lg hover:shadow-[#22c55e]/20 active:scale-95 font-mono disabled:opacity-50"
+          >
+            <Archive className="h-4 w-4" /> {saving ? "SALVANDO..." : "ADICIONAR"}
+          </Button>
+        </div>
+      </form>
+
+      <div className="flex justify-end">
+        <select
+          value={programaFiltro}
+          onChange={(e) => setProgramaFiltro(e.target.value)}
+          className="px-4 py-2 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 text-xs focus:outline-none focus:border-[#22c55e] transition-all appearance-none cursor-pointer font-mono"
+        >
+          <option value="Todos">Todos os programas</option>
+          {PROGRAMAS_VT.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-12 text-slate-500 italic font-mono text-xs">CARREGANDO...</div>
+      ) : vts.length === 0 ? (
+        <div className="bg-[#0f0f12] border border-dashed border-[#22c55e]/30 rounded-lg p-12 text-center text-slate-500 text-xs font-mono">
+          GAVETA VAZIA
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3">
+          {vts.map((v) => (
+            <div
+              key={v.id}
+              className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-4 hover:bg-[#1a1a21] hover:border-[#22c55e]/40 transition-all group backdrop-blur-lg shadow-xl flex items-start justify-between gap-3"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-3 flex-wrap mb-2">
+                  <span className="bg-[#22c55e]/20 text-[#22c55e] text-xs px-3 py-1 rounded-md border border-[#22c55e]/40 font-mono font-bold uppercase tracking-wider">
+                    {v.programa}
+                  </span>
+                  <span className="text-xs text-slate-500 flex items-center gap-1 font-mono">
+                    <CalendarIcon className="h-3 w-3" />
+                    {new Date(v.data_pronto + "T00:00:00").toLocaleDateString("pt-BR")}
+                  </span>
+                </div>
+                <h3 className="text-sm font-black text-slate-100 font-mono uppercase">{v.retranca}</h3>
+                {v.observacao && <p className="text-xs text-slate-400 mt-1">{v.observacao}</p>}
+              </div>
+              <button
+                onClick={() => handleDelete(v.id)}
+                className="p-2 rounded-md text-slate-500 hover:bg-[#1a1a21] hover:text-red-400 transition-all shrink-0"
+                title="Remover"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PortaisTab() {
+  return <div className="p-4 text-slate-400 text-sm font-mono">Portais em desenvolvimento...</div>;
 }

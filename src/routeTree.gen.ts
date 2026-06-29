@@ -12,7 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as TpRouteImport } from './routes/tp'
 import { Route as RelatoriosRouteImport } from './routes/relatorios'
 import { Route as RedacaoRouteImport } from './routes/redacao'
-import { Route as PlayouTRouteImport } from './routes/playouT'
+import { Route as PlayoutRouteImport } from './routes/playout'
 import { Route as PesquisaRouteImport } from './routes/pesquisa'
 import { Route as PautasRouteImport } from './routes/pautas'
 import { Route as MetricasRouteImport } from './routes/metricas'
@@ -37,9 +37,9 @@ const RedacaoRoute = RedacaoRouteImport.update({
   path: '/redacao',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PlayouTRoute = PlayouTRouteImport.update({
-  id: '/playouT',
-  path: '/playouT',
+const PlayoutRoute = PlayoutRouteImport.update({
+  id: '/playout',
+  path: '/playout',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PesquisaRoute = PesquisaRouteImport.update({
@@ -92,7 +92,7 @@ export interface FileRoutesByFullPath {
   '/metricas': typeof MetricasRoute
   '/pautas': typeof PautasRoute
   '/pesquisa': typeof PesquisaRoute
-  '/playouT': typeof PlayouTRoute
+  '/playout': typeof PlayoutRoute
   '/redacao': typeof RedacaoRoute
   '/relatorios': typeof RelatoriosRoute
   '/tp': typeof TpRoute
@@ -106,7 +106,7 @@ export interface FileRoutesByTo {
   '/metricas': typeof MetricasRoute
   '/pautas': typeof PautasRoute
   '/pesquisa': typeof PesquisaRoute
-  '/playouT': typeof PlayouTRoute
+  '/playout': typeof PlayoutRoute
   '/redacao': typeof RedacaoRoute
   '/relatorios': typeof RelatoriosRoute
   '/tp': typeof TpRoute
@@ -121,7 +121,7 @@ export interface FileRoutesById {
   '/metricas': typeof MetricasRoute
   '/pautas': typeof PautasRoute
   '/pesquisa': typeof PesquisaRoute
-  '/playouT': typeof PlayouTRoute
+  '/playout': typeof PlayoutRoute
   '/redacao': typeof RedacaoRoute
   '/relatorios': typeof RelatoriosRoute
   '/tp': typeof TpRoute
@@ -137,7 +137,7 @@ export interface FileRouteTypes {
     | '/metricas'
     | '/pautas'
     | '/pesquisa'
-    | '/playouT'
+    | '/playout'
     | '/redacao'
     | '/relatorios'
     | '/tp'
@@ -151,7 +151,7 @@ export interface FileRouteTypes {
     | '/metricas'
     | '/pautas'
     | '/pesquisa'
-    | '/playouT'
+    | '/playout'
     | '/redacao'
     | '/relatorios'
     | '/tp'
@@ -165,7 +165,7 @@ export interface FileRouteTypes {
     | '/metricas'
     | '/pautas'
     | '/pesquisa'
-    | '/playouT'
+    | '/playout'
     | '/redacao'
     | '/relatorios'
     | '/tp'
@@ -180,7 +180,7 @@ export interface RootRouteChildren {
   MetricasRoute: typeof MetricasRoute
   PautasRoute: typeof PautasRoute
   PesquisaRoute: typeof PesquisaRoute
-  PlayouTRoute: typeof PlayouTRoute
+  PlayoutRoute: typeof PlayoutRoute
   RedacaoRoute: typeof RedacaoRoute
   RelatoriosRoute: typeof RelatoriosRoute
   TpRoute: typeof TpRoute
@@ -209,11 +209,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RedacaoRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/playouT': {
-      id: '/playouT'
-      path: '/playouT'
-      fullPath: '/playouT'
-      preLoaderRoute: typeof PlayouTRouteImport
+    '/playout': {
+      id: '/playout'
+      path: '/playout'
+      fullPath: '/playout'
+      preLoaderRoute: typeof PlayoutRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/pesquisa': {
@@ -284,7 +284,7 @@ const rootRouteChildren: RootRouteChildren = {
   MetricasRoute: MetricasRoute,
   PautasRoute: PautasRoute,
   PesquisaRoute: PesquisaRoute,
-  PlayouTRoute: PlayouTRoute,
+  PlayoutRoute: PlayoutRoute,
   RedacaoRoute: RedacaoRoute,
   RelatoriosRoute: RelatoriosRoute,
   TpRoute: TpRoute,

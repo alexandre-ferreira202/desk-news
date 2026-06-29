@@ -20,7 +20,8 @@ import {
   Keyboard,
   Touchpad,
   Zap
-} from "lucide-react";
+} from "lucide-react"; // Adicionado BookOpen
+import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { parseTimeToSeconds } from "@/lib/time";
@@ -278,6 +279,52 @@ function InstructionsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
   );
 }
 
+function ReadingMonitor({
+  isOpen,
+  onClose,
+  content,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  content: string | null;
+}) {
+  const monitorScrollRef = useRef<HTMLDivElement>(null);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed bottom-4 left-4 z-[200] w-96 h-64 bg-zinc-900/90 backdrop-blur-md border border-zinc-700 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="flex items-center justify-between p-3 bg-zinc-950/50 border-b border-zinc-800">
+        <div className="flex items-center gap-2">
+          <BookOpen className="h-4 w-4 text-primary" />
+          <h3 className="text-xs font-bold uppercase tracking-wider">Monitor de Leitura</h3>
+        </div>
+        <button onClick={onClose} className="p-1.5 hover:bg-zinc-800 rounded-md transition-colors">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div
+        ref={monitorScrollRef}
+        className="flex-1 overflow-y-auto p-4 no-scrollbar"
+        style={{ lineHeight: 1.5, textAlign: "center", scrollBehavior: 'smooth' }}
+      >
+        {content ? (
+          <div
+            className="whitespace-pre-wrap text-xs uppercase font-bold tracking-wider"
+            // O texto aqui não é espelhado e agora segue o padrão da sidebar
+          >
+            {content}
+          </div>
+        ) : (
+          <div className="flex items-center justify-center h-full text-zinc-600 italic text-sm">
+            Aguardando texto...
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TeleprompterPage() {
   const searchParams = Route.useSearch();
   const [date, setDate] = useState(searchParams.date || "");
@@ -297,16 +344,17 @@ function TeleprompterPage() {
   const [totalProgress, setTotalProgress] = useState(0);
   const [showInstructions, setShowInstructions] = useState(false);
   const [syncMode, setSyncMode] = useState<"master" | "camera">("master");
+  const [showReadingMonitor, setShowReadingMonitor] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
-  const [lastBroadcastTime, setLastBroadcastTime] = useState(0);
+  const lastBroadcastTimeRef = useRef(0);
   const rodaTvRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const requestRef = useRef<number>();
-  const channelRef = useRef<any>(null);
   const isRemoteUpdateRef = useRef(false);
+  const rodaTvFiredRef = useRef<string | null>(null); // dispara apenas 1x por matéria
   const touchStartRef = useRef<{ x: number; y: number; time: number }>({ x: 0, y: 0, time: 0 });
   const doubleClickTimerRef = useRef<NodeJS.Timeout>();
-  
+
   // Garante data local correta após hidratação (SSR usa UTC, browser usa fuso local)
   useEffect(() => {
     if (searchParams.date) {
@@ -389,55 +437,18 @@ function TeleprompterPage() {
     }
   }, [items]);
 
-  // Realtime cirúrgico — atualiza só o que mudou, sem recarregar tudo
+  // Polling cirúrgico — substitui realtime (supabase.channel indisponível)
   useEffect(() => {
-    const channel = supabase.channel('tp_sync')
-      // UPDATE de item: patch só o campo que mudou, sem mexer no resto
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'espelho_itens' }, ({ new: row }) => {
-        setItems(prev => {
-          const idx = prev.findIndex(i => i.id === row.id);
-          if (idx === -1) return prev; // item não pertence a este programa/data
-          const next = [...prev];
-          next[idx] = {
-            ...next[idx],
-            assunto:   row.assunto   ?? next[idx].assunto,
-            cabeca:    row.cabeca    ?? next[idx].cabeca,
-            status:    row.status    ?? next[idx].status,
-            tempo_cab: row.tempo_cab ?? next[idx].tempo_cab,
-            ordem:     row.ordem     ?? next[idx].ordem,
-          };
-          return next;
-        });
-        // Se ficou no_ar no espelho → avança o TP para ele sem resetar scroll
-        if (row.status === 'no_ar') {
-          setSelectedItemId(prev => prev === row.id ? prev : row.id);
-        }
-      })
-      // INSERT / DELETE / mudança de bloco → recarrega estrutura completa
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'espelho_itens' }, () => loadItems())
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'espelho_itens' }, () => loadItems())
-      .on('postgres_changes', { event: '*',      schema: 'public', table: 'espelho_blocos' }, () => loadItems())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    const interval = setInterval(() => {
+      loadItems();
+    }, 30000); // 30s — evita 429 no NeonDB
+    return () => clearInterval(interval);
   }, [loadItems]);
 
-  // Canal espelho_sync: broadcast imediato quando modal do Espelho salva (< 100ms)
+  // Polling espelho_sync: verifica atualizações de cabeça
   useEffect(() => {
-    const ch = supabase.channel('espelho_sync')
-      .on('broadcast', { event: 'cabeca_atualizada' }, ({ payload }) => {
-        const { itemId, cabeca, assunto, tempo_cab } = payload as {
-          itemId: string; cabeca: string; assunto: string; tempo_cab: string;
-        };
-        setItems(prev => {
-          const idx = prev.findIndex(i => i.id === itemId);
-          if (idx === -1) return prev;
-          const next = [...prev];
-          next[idx] = { ...next[idx], cabeca, assunto, tempo_cab };
-          return next;
-        });
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    // As atualizações já chegam via loadItems polling acima.
+    // Este efeito é mantido para compatibilidade futura.
   }, []);
 
   useEffect(() => {
@@ -445,102 +456,96 @@ function TeleprompterPage() {
   }, [date, programa]);
 
   // ─────────────────────────────────────────────────────────────────────────
-  // BROADCAST MASTER → CAMERA (SUPABASE REALTIME)
+  // SYNC MASTER → CAMERA via polling (substitui supabase.channel broadcast)
+  // Master: grava estado em tp_master_state a cada mudança
+  // Camera: lê tp_master_state a cada 500ms
   // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const canalNome = `tp-sync-${programa || "geral"}`;
-    const canal = supabase.channel(canalNome);
-    channelRef.current = canal;
+    if (syncMode !== "camera") return;
 
-    canal
-      .on("broadcast", { event: "tp-state" }, ({ payload }) => {
-        // CAMERA: aplica estado recebido do MASTER
-        if (syncMode === "camera" && payload) {
-          isRemoteUpdateRef.current = true;
+    setIsConnected(true);
 
-          if (
-            payload.selectedItemId !== undefined &&
-            payload.selectedItemId !== selectedItemId
-          )
-            setSelectedItemId(payload.selectedItemId);
+    const interval = setInterval(async () => {
+      const key = `tp-sync-${programa || "geral"}`;
+      const { data, error } = await supabase
+        .from("tp_master_state")
+        .select("*")
+        .eq("canal", key)
+        .maybeSingle();
 
-          if (payload.isScrolling !== undefined)
-            setIsScrolling(payload.isScrolling);
-          if (payload.fontSize !== undefined) setFontSize(payload.fontSize);
-          if (payload.scrollSpeed !== undefined)
-            setScrollSpeed(payload.scrollSpeed);
-          if (payload.mirrored !== undefined) setMirrored(payload.mirrored);
-          if (payload.scrollTop !== undefined && scrollRef.current) {
-            scrollRef.current.scrollTop = payload.scrollTop;
-          }
+      if (error || !data) return;
 
-          setTimeout(() => {
-            isRemoteUpdateRef.current = false;
-          }, 100);
-        }
-      })
-      .subscribe((status) => {
-        setIsConnected(status === "SUBSCRIBED");
-      });
+      const payload = data.state as {
+        selectedItemId?: string;
+        isScrolling?: boolean;
+        fontSize?: number;
+        scrollSpeed?: number;
+        mirrored?: boolean;
+        scrollTop?: number;
+      };
+
+      isRemoteUpdateRef.current = true;
+
+      if (payload.selectedItemId !== undefined && payload.selectedItemId !== selectedItemId)
+        setSelectedItemId(payload.selectedItemId);
+      if (payload.isScrolling !== undefined) setIsScrolling(payload.isScrolling);
+      if (payload.fontSize !== undefined) setFontSize(payload.fontSize);
+      if (payload.scrollSpeed !== undefined) setScrollSpeed(payload.scrollSpeed);
+      if (payload.mirrored !== undefined) setMirrored(payload.mirrored);
+      if (payload.scrollTop !== undefined && scrollRef.current)
+        scrollRef.current.scrollTop = payload.scrollTop;
+
+      setTimeout(() => { isRemoteUpdateRef.current = false; }, 100);
+    }, 1500); // 1.5s — evita 429 no NeonDB
 
     return () => {
-      supabase.removeChannel(canal);
+      clearInterval(interval);
+      setIsConnected(false);
     };
-  }, [syncMode, selectedItemId, programa]);
+  }, [syncMode, programa, selectedItemId]);
 
   // ─────────────────────────────────────────────────────────────────────────
-  // BROADCAST DO MASTER PARA OS CAMERAS
+  // MASTER: grava estado na tabela tp_master_state (polling-based sync)
+  // Throttle via ref para não causar re-renders nem rajadas de upsert
   // ─────────────────────────────────────────────────────────────────────────
-  const broadcastState = useCallback(() => {
-    if (syncMode !== "master" || !channelRef.current) return;
+  const syncStateRef = useRef({ selectedItemId, isScrolling, fontSize, scrollSpeed, mirrored, syncMode, programa });
+  useEffect(() => {
+    syncStateRef.current = { selectedItemId, isScrolling, fontSize, scrollSpeed, mirrored, syncMode, programa };
+  }, [selectedItemId, isScrolling, fontSize, scrollSpeed, mirrored, syncMode, programa]);
 
+  const doUpsert = useCallback(async () => {
+    const s = syncStateRef.current;
+    if (s.syncMode !== "master") return;
     const now = Date.now();
-    if (now - lastBroadcastTime < 50) return; // throttle
-
-    setLastBroadcastTime(now);
-
-    channelRef.current.send({
-      type: "broadcast",
-      event: "tp-state",
-      payload: {
-        selectedItemId,
-        isScrolling,
-        fontSize,
-        scrollSpeed,
-        mirrored,
+    if (now - lastBroadcastTimeRef.current < 2000) return; // throttle 2s via ref
+    lastBroadcastTimeRef.current = now;
+    const key = `tp-sync-${s.programa || "geral"}`;
+    await supabase.from("tp_master_state").upsert({
+      canal: key,
+      state: {
+        selectedItemId: s.selectedItemId,
+        isScrolling: s.isScrolling,
+        fontSize: s.fontSize,
+        scrollSpeed: s.scrollSpeed,
+        mirrored: s.mirrored,
         scrollTop: scrollRef.current?.scrollTop || 0,
       },
-    });
-  }, [syncMode, selectedItemId, isScrolling, fontSize, scrollSpeed, mirrored, lastBroadcastTime]);
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "canal" });
+  }, []);
 
-  // Broadcast quando estado muda
+  // Upsert ao mudar estado discreto (item, play/pause, fonte, velocidade, espelho)
   useEffect(() => {
-    broadcastState();
-  }, [isScrolling, fontSize, scrollSpeed, mirrored, selectedItemId, broadcastState]);
+    lastBroadcastTimeRef.current = 0; // reseta throttle para mudanças imediatas
+    doUpsert();
+  }, [selectedItemId, isScrolling, fontSize, scrollSpeed, mirrored, doUpsert]);
 
-  // 🔧 FIX ÚNICO: Broadcast contínuo durante scroll automático (NÃO MEXEU EM MAIS NADA!)
+  // Upsert periódico durante scroll para sincronizar posição (a cada 3s)
   useEffect(() => {
-    if (syncMode !== "master" || !isScrolling) {
-      return;
-    }
-
-    let animationFrameId: number;
-    let lastScrollTop = scrollRef.current?.scrollTop || 0;
-
-    const broadcastContinuous = () => {
-      const currentScrollTop = scrollRef.current?.scrollTop || 0;
-      if (currentScrollTop !== lastScrollTop) {
-        lastScrollTop = currentScrollTop;
-        broadcastState();
-      }
-
-      animationFrameId = requestAnimationFrame(broadcastContinuous);
-    };
-
-    animationFrameId = requestAnimationFrame(broadcastContinuous);
-
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [syncMode, isScrolling, broadcastState]);
+    if (syncMode !== "master" || !isScrolling) return;
+    const interval = setInterval(() => { doUpsert(); }, 3000);
+    return () => clearInterval(interval);
+  }, [syncMode, isScrolling, doUpsert]);
 
   const currentItem = items.find(i => i.id === selectedItemId);
 
@@ -561,6 +566,8 @@ function TeleprompterPage() {
         setIsScrolling(false);
         if (scrollRef.current) scrollRef.current.scrollTop = 0;
         lastSelectedId.current = selectedItemId;
+        // Reset do gatilho RODA_VT para a nova matéria
+        rodaTvFiredRef.current = null;
       }
     }
   }, [selectedItemId, currentItem]);
@@ -635,6 +642,24 @@ function TeleprompterPage() {
 
         // Stop when the top of [RODA TV] reaches the center of the prompter viewport
         if (rodaTvRect.top <= centerLine) {
+          if (
+            currentItem &&
+            rodaTvFiredRef.current !== currentItem.id
+          ) {
+            rodaTvFiredRef.current = currentItem.id;
+            // Envia sinal RODA_VT via tabela (substitui channel broadcast)
+            supabase.from("tp_playout_events").insert({
+              event: "RODA_VT",
+              materia_id: currentItem.materia_id ?? null,
+              assunto: currentItem.assunto,
+              item_id: currentItem.id,
+              created_at: new Date().toISOString(),
+            }).then(({ error }) => {
+              if (error) console.error("Erro ao enviar RODA_VT:", error.message);
+            });
+          }
+          
+          // A rolagem só deve parar DEPOIS de enviar o comando RODA_VT
           shouldStopScrolling = true;
         }
       } else {
@@ -807,6 +832,13 @@ function TeleprompterPage() {
       <InstructionsModal isOpen={showInstructions} onClose={() => setShowInstructions(false)} />
 
       {/* Toolbar de Controle */}
+      <ReadingMonitor
+        isOpen={showReadingMonitor}
+        onClose={() => setShowReadingMonitor(false)}
+        content={currentItem?.cabeca ?? null}
+      />
+
+      {/* Toolbar de Controle */}
       {!isFullscreen && (
         <div className="p-4 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between z-50 shrink-0 flex-wrap gap-4">
           <div className="flex items-center gap-4">
@@ -874,6 +906,9 @@ function TeleprompterPage() {
               </Button>
               <Button size="icon" variant="outline" onClick={() => setShowInstructions(true)} className="h-8 w-8" title="Guia de Atalhos">
                 <HelpCircle className="h-4 w-4" />
+              </Button>
+              <Button size="icon" variant={showReadingMonitor ? "default" : "outline"} onClick={() => setShowReadingMonitor(p => !p)} className="h-8 w-8" title="Monitor de Leitura">
+                <BookOpen className="h-4 w-4" />
               </Button>
             </div>
           </div>
@@ -956,10 +991,10 @@ function TeleprompterPage() {
           onClick={() => setIsScrolling(!isScrolling)}
           style={{ fontSize: `${fontSize}px`, scrollBehavior: 'auto' }}
         >
-          <div className="max-w-5xl mx-auto uppercase font-bold">
+          <div className="max-w-5xl mx-auto uppercase font-bold text-center">
             {currentItem ? (
-              <div className="space-y-12">
-                <div className="text-primary/20 text-sm tracking-[0.5em] text-center border-b border-primary/10 pb-4 mb-8">
+              <div className="space-y-16">
+                <div className="text-emerald-400 text-5xl tracking-wider text-center border-b-2 border-emerald-500/20 pb-6 mb-12">
                    {currentItem.assunto}
                 </div>
 
@@ -967,7 +1002,7 @@ function TeleprompterPage() {
                 {(() => {
                   const bl = blocos.find(b => b.id === currentItem.bloco_id);
                   return bl?.apresentador && (
-                    <div className="text-emerald-500 text-center mb-8 text-4xl border-2 border-emerald-500/20 py-4 rounded-xl bg-emerald-500/5">
+                    <div className="text-amber-400 text-center mb-12 text-6xl font-black border-2 border-amber-500/20 py-4 rounded-xl bg-amber-500/10">
                       [{bl.apresentador}]
                     </div>
                   );
@@ -978,7 +1013,7 @@ function TeleprompterPage() {
                     <div className="whitespace-pre-wrap leading-[1.25]">
                       {currentItem.cabeca}
                     </div>
-                    <div ref={rodaTvRef} className="text-emerald-500 text-center mt-12 text-4xl border-2 border-emerald-500/20 py-4 rounded-xl bg-emerald-500/5">
+                    <div ref={rodaTvRef} className="text-emerald-400 text-center mt-16 text-6xl font-black border-4 border-emerald-500/30 py-6 rounded-2xl bg-emerald-500/10">
                       [RODA TV]
                     </div>
                   </>

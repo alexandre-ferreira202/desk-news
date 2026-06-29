@@ -20,7 +20,8 @@ import {
   Keyboard,
   Touchpad,
   Zap
-} from "lucide-react";
+} from "lucide-react"; // Adicionado BookOpen
+import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { parseTimeToSeconds } from "@/lib/time";
@@ -52,6 +53,7 @@ interface Bloco {
   nome: string;
   ordem: number;
   apresentador: string | null;
+  programa?: string;
 }
 
 const PROGRAMAS = ["Todos", "Jornal da Manhã", "Edição Meio-Dia", "Jornal da Noite"] as const;
@@ -277,10 +279,58 @@ function InstructionsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
   );
 }
 
+function ReadingMonitor({
+  isOpen,
+  onClose,
+  content,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  content: string | null;
+}) {
+  const monitorScrollRef = useRef<HTMLDivElement>(null);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed bottom-4 left-4 z-[200] w-96 h-64 bg-zinc-900/90 backdrop-blur-md border border-zinc-700 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="flex items-center justify-between p-3 bg-zinc-950/50 border-b border-zinc-800">
+        <div className="flex items-center gap-2">
+          <BookOpen className="h-4 w-4 text-primary" />
+          <h3 className="text-xs font-bold uppercase tracking-wider">Monitor de Leitura</h3>
+        </div>
+        <button onClick={onClose} className="p-1.5 hover:bg-zinc-800 rounded-md transition-colors">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div
+        ref={monitorScrollRef}
+        className="flex-1 overflow-y-auto p-4 no-scrollbar"
+        style={{ lineHeight: 1.5, textAlign: "center", scrollBehavior: 'smooth' }}
+      >
+        {content ? (
+          <div
+            className="whitespace-pre-wrap text-xs uppercase font-bold tracking-wider"
+            // O texto aqui não é espelhado e agora segue o padrão da sidebar
+          >
+            {content}
+          </div>
+        ) : (
+          <div className="flex items-center justify-center h-full text-zinc-600 italic text-sm">
+            Aguardando texto...
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TeleprompterPage() {
   const searchParams = Route.useSearch();
-  const [date, setDate] = useState(searchParams.date || new Date().toISOString().slice(0, 10));
-  const [programa, setPrograma] = useState(searchParams.programa || "Todos");
+  const [date, setDate] = useState(searchParams.date || "");
+  const [programa, setPrograma] = useState(
+    searchParams.programa ? decodeURIComponent(searchParams.programa) : "Todos"
+  );
   const [items, setItems] = useState<TPItem[]>([]);
   const [blocos, setBlocos] = useState<Bloco[]>([]);
   const [fontSize, setFontSize] = useState(90);
@@ -294,6 +344,7 @@ function TeleprompterPage() {
   const [totalProgress, setTotalProgress] = useState(0);
   const [showInstructions, setShowInstructions] = useState(false);
   const [syncMode, setSyncMode] = useState<"master" | "camera">("master");
+  const [showReadingMonitor, setShowReadingMonitor] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [lastBroadcastTime, setLastBroadcastTime] = useState(0);
   const rodaTvRef = useRef<HTMLDivElement>(null);
@@ -301,99 +352,155 @@ function TeleprompterPage() {
   const requestRef = useRef<number>();
   const channelRef = useRef<any>(null);
   const isRemoteUpdateRef = useRef(false);
+  // ── Supabase Broadcast: sinal RODA_VT → Playout (cross-machine) ──────────
+  const playoutChannelRef = useRef<any>(null);
+  const rodaTvFiredRef = useRef<string | null>(null); // dispara apenas 1x por matéria
   const touchStartRef = useRef<{ x: number; y: number; time: number }>({ x: 0, y: 0, time: 0 });
   const doubleClickTimerRef = useRef<NodeJS.Timeout>();
-  
-  // Sincroniza estado local com parâmetros da URL caso mudem externamente
+
+  // ── Abre canal Supabase Broadcast dedicado ao sinal RODA_VT ──────────────
   useEffect(() => {
-    if (searchParams.date) setDate(searchParams.date);
-    if (searchParams.programa) setPrograma(searchParams.programa);
+    const ch = supabase.channel("desknews_playout_sync");
+    playoutChannelRef.current = ch;
+    ch.subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+      playoutChannelRef.current = null;
+    };
+  }, []);
+
+  // Garante data local correta após hidratação (SSR usa UTC, browser usa fuso local)
+  useEffect(() => {
+    if (searchParams.date) {
+      setDate(searchParams.date);
+    } else if (!date) {
+      const n = new Date();
+      setDate(`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`);
+    }
+    if (searchParams.programa) setPrograma(decodeURIComponent(searchParams.programa));
   }, [searchParams.date, searchParams.programa]);
 
   const loadItems = useCallback(async () => {
-    let query = supabase
+    if (!date) return;
+
+    const programaNorm = decodeURIComponent(programa || "Todos").trim().toLowerCase();
+
+    // Busca todos os blocos da data e filtra em memória (evita problema de collation com acentos)
+    const { data: allBlocks, error: bErr } = await supabase
       .from("espelho_blocos")
-      .select("id, nome, ordem, apresentador")
-      .eq("data_edicao", date);
+      .select("id, nome, ordem, apresentador, programa")
+      .eq("data_edicao", date)
+      .order("ordem");
 
-    // Se o programa não for "Todos", filtra pelo nome. Se for "Todos", traz de todos os programas.
-    if (programa !== "Todos") {
-      query = query.ilike("programa", programa);
-    }
+    if (bErr) { toast.error("Erro ao carregar blocos: " + bErr.message); return; }
 
-    const { data: blocks, error: bErr } = await query.order("ordem");
+    const blocks = programaNorm === "todos"
+      ? (allBlocks ?? [])
+      : (allBlocks ?? []).filter(b => (b.programa ?? "").toLowerCase().trim() === programaNorm);
 
-    if (bErr) {
-      toast.error("Erro ao carregar blocos: " + bErr.message);
-      return;
-    }
-
-    if (blocks && blocks.length > 0) {
+    if (blocks.length > 0) {
       setBlocos(blocks as Bloco[]);
 
       const { data: rawItens, error: iErr } = await supabase
         .from("espelho_itens")
         .select("id, bloco_id, assunto, cabeca, ordem, status, tempo_cab, materia_id")
-        .in("bloco_id", blocks.map(b => String(b.id)));
-      
+        .in("bloco_id", blocks.map(b => b.id))
+        .order("ordem");
+
       if (iErr) toast.error("Erro ao carregar matérias: " + iErr.message);
 
-      // LÓGICA DE ÍNDICE GLOBAL ABSOLUTO:
-      // Mapeia os itens garantindo que a ordem siga a sequência dos blocos
-      const globalItemsSequence: TPItem[] = [];
+      // Sequência global respeitando ordem dos blocos → ordem dos itens dentro de cada bloco
+      const seq: TPItem[] = [];
       blocks.forEach(block => {
-        const itemsInBlock = (rawItens || [])
-          .filter(item => String(item.bloco_id) === String(block.id))
-          .sort((a, b) => a.ordem - b.ordem);
-        globalItemsSequence.push(...(itemsInBlock as TPItem[]));
+        (rawItens || [])
+          .filter(i => i.bloco_id === block.id)
+          .sort((a, b) => a.ordem - b.ordem)
+          .forEach(i => seq.push(i as TPItem));
       });
 
-      // Buscar cabecas das materias vinculadas
-      const materiaIds = globalItemsSequence
-        .filter(i => i.materia_id && !i.cabeca)
-        .map(i => i.materia_id as string);
-
+      // Buscar cabeças das matérias vinculadas que ainda não têm texto
+      const materiaIds = seq.filter(i => i.materia_id && !i.cabeca).map(i => i.materia_id as string);
       if (materiaIds.length > 0) {
-        const { data: mats } = await supabase
-          .from("materias")
-          .select("id, cabeca")
-          .in("id", materiaIds);
-
+        const { data: mats } = await supabase.from("materias").select("id, cabeca").in("id", materiaIds);
         if (mats) {
-          const materiaMap = Object.fromEntries(mats.map(m => [m.id, m.cabeca]));
-          globalItemsSequence.forEach(item => {
-            if (item.materia_id && !item.cabeca && materiaMap[item.materia_id]) {
-              item.cabeca = materiaMap[item.materia_id];
-            }
+          const map = Object.fromEntries(mats.map(m => [m.id, m.cabeca]));
+          seq.forEach(item => {
+            if (item.materia_id && !item.cabeca && map[item.materia_id])
+              item.cabeca = map[item.materia_id];
           });
         }
       }
 
-      setItems(globalItemsSequence);
+      setItems(seq);
     } else {
       setItems([]);
       setBlocos([]);
-      console.warn("Nenhum bloco encontrado para esta data/programa");
     }
-  }, [date, programa]); 
+  }, [date, programa]);
 
-  // Sincroniza a seleção: seleciona a primeira se nada estiver marcado, ou limpa se o espelho esvaziar
+  // Sincroniza a seleção: seleciona a primeira SOMENTE se nada estiver marcado ou o item sumiu
+  // NÃO reseta se o item ainda existe (evita perder posição no reload do realtime)
   useEffect(() => {
     if (items.length === 0) {
       setSelectedItemId(null);
-    } else if (!selectedItemId || !items.some(i => i.id === selectedItemId)) {
-      setSelectedItemId(items[0].id);
+    } else {
+      setSelectedItemId(prev => {
+        if (!prev || !items.some(i => i.id === prev)) return items[0].id;
+        return prev; // mantém o item atual
+      });
     }
-  }, [items, selectedItemId]);
+  }, [items]);
 
-  // Realtime
+  // Realtime cirúrgico — atualiza só o que mudou, sem recarregar tudo
   useEffect(() => {
     const channel = supabase.channel('tp_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'espelho_itens' }, () => loadItems())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'espelho_blocos' }, () => loadItems())
+      // UPDATE de item: patch só o campo que mudou, sem mexer no resto
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'espelho_itens' }, ({ new: row }) => {
+        setItems(prev => {
+          const idx = prev.findIndex(i => i.id === row.id);
+          if (idx === -1) return prev; // item não pertence a este programa/data
+          const next = [...prev];
+          next[idx] = {
+            ...next[idx],
+            assunto:   row.assunto   ?? next[idx].assunto,
+            cabeca:    row.cabeca    ?? next[idx].cabeca,
+            status:    row.status    ?? next[idx].status,
+            tempo_cab: row.tempo_cab ?? next[idx].tempo_cab,
+            ordem:     row.ordem     ?? next[idx].ordem,
+          };
+          return next;
+        });
+        // Se ficou no_ar no espelho → avança o TP para ele sem resetar scroll
+        if (row.status === 'no_ar') {
+          setSelectedItemId(prev => prev === row.id ? prev : row.id);
+        }
+      })
+      // INSERT / DELETE / mudança de bloco → recarrega estrutura completa
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'espelho_itens' }, () => loadItems())
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'espelho_itens' }, () => loadItems())
+      .on('postgres_changes', { event: '*',      schema: 'public', table: 'espelho_blocos' }, () => loadItems())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [loadItems]);
+
+  // Canal espelho_sync: broadcast imediato quando modal do Espelho salva (< 100ms)
+  useEffect(() => {
+    const ch = supabase.channel('espelho_sync')
+      .on('broadcast', { event: 'cabeca_atualizada' }, ({ payload }) => {
+        const { itemId, cabeca, assunto, tempo_cab } = payload as {
+          itemId: string; cabeca: string; assunto: string; tempo_cab: string;
+        };
+        setItems(prev => {
+          const idx = prev.findIndex(i => i.id === itemId);
+          if (idx === -1) return prev;
+          const next = [...prev];
+          next[idx] = { ...next[idx], cabeca, assunto, tempo_cab };
+          return next;
+        });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, []);
 
   useEffect(() => {
     loadItems();
@@ -473,6 +580,30 @@ function TeleprompterPage() {
     broadcastState();
   }, [isScrolling, fontSize, scrollSpeed, mirrored, selectedItemId, broadcastState]);
 
+  // 🔧 FIX ÚNICO: Broadcast contínuo durante scroll automático (NÃO MEXEU EM MAIS NADA!)
+  useEffect(() => {
+    if (syncMode !== "master" || !isScrolling) {
+      return;
+    }
+
+    let animationFrameId: number;
+    let lastScrollTop = scrollRef.current?.scrollTop || 0;
+
+    const broadcastContinuous = () => {
+      const currentScrollTop = scrollRef.current?.scrollTop || 0;
+      if (currentScrollTop !== lastScrollTop) {
+        lastScrollTop = currentScrollTop;
+        broadcastState();
+      }
+
+      animationFrameId = requestAnimationFrame(broadcastContinuous);
+    };
+
+    animationFrameId = requestAnimationFrame(broadcastContinuous);
+
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [syncMode, isScrolling, broadcastState]);
+
   const currentItem = items.find(i => i.id === selectedItemId);
 
   // Índice Global Absoluto da matéria ativa
@@ -492,6 +623,8 @@ function TeleprompterPage() {
         setIsScrolling(false);
         if (scrollRef.current) scrollRef.current.scrollTop = 0;
         lastSelectedId.current = selectedItemId;
+        // Reset do gatilho RODA_VT para a nova matéria
+        rodaTvFiredRef.current = null;
       }
     }
   }, [selectedItemId, currentItem]);
@@ -566,6 +699,24 @@ function TeleprompterPage() {
 
         // Stop when the top of [RODA TV] reaches the center of the prompter viewport
         if (rodaTvRect.top <= centerLine) {
+          if (
+            playoutChannelRef.current &&
+            currentItem &&
+            rodaTvFiredRef.current !== currentItem.id
+          ) {
+            rodaTvFiredRef.current = currentItem.id;
+            playoutChannelRef.current.send({
+              type: "broadcast",
+              event: "RODA_VT",
+              payload: {
+                materiaId: currentItem.materia_id ?? null,
+                assunto: currentItem.assunto,
+                itemId: currentItem.id,
+              },
+            });
+          }
+          
+          // A rolagem só deve parar DEPOIS de enviar o comando RODA_VT
           shouldStopScrolling = true;
         }
       } else {
@@ -738,6 +889,13 @@ function TeleprompterPage() {
       <InstructionsModal isOpen={showInstructions} onClose={() => setShowInstructions(false)} />
 
       {/* Toolbar de Controle */}
+      <ReadingMonitor
+        isOpen={showReadingMonitor}
+        onClose={() => setShowReadingMonitor(false)}
+        content={currentItem?.cabeca ?? null}
+      />
+
+      {/* Toolbar de Controle */}
       {!isFullscreen && (
         <div className="p-4 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between z-50 shrink-0 flex-wrap gap-4">
           <div className="flex items-center gap-4">
@@ -806,6 +964,9 @@ function TeleprompterPage() {
               <Button size="icon" variant="outline" onClick={() => setShowInstructions(true)} className="h-8 w-8" title="Guia de Atalhos">
                 <HelpCircle className="h-4 w-4" />
               </Button>
+              <Button size="icon" variant={showReadingMonitor ? "default" : "outline"} onClick={() => setShowReadingMonitor(p => !p)} className="h-8 w-8" title="Monitor de Leitura">
+                <BookOpen className="h-4 w-4" />
+              </Button>
             </div>
           </div>
         </div>
@@ -831,7 +992,7 @@ function TeleprompterPage() {
               {(() => {
                 let globalCounter = 0;
                 return blocos.map((b) => {
-                  const blockItems = items.filter(i => String(i.bloco_id) === String(b.id));
+                  const blockItems = items.filter(i => i.bloco_id === b.id);
                   
                   // Capturamos o valor atual para este bloco antes de incrementar para o próximo
                   const startIdx = globalCounter;
@@ -887,18 +1048,18 @@ function TeleprompterPage() {
           onClick={() => setIsScrolling(!isScrolling)}
           style={{ fontSize: `${fontSize}px`, scrollBehavior: 'auto' }}
         >
-          <div className="max-w-5xl mx-auto uppercase font-bold">
+          <div className="max-w-5xl mx-auto uppercase font-bold text-center">
             {currentItem ? (
-              <div className="space-y-12">
-                <div className="text-primary/20 text-sm tracking-[0.5em] text-center border-b border-primary/10 pb-4 mb-8">
+              <div className="space-y-16">
+                <div className="text-emerald-400 text-5xl tracking-wider text-center border-b-2 border-emerald-500/20 pb-6 mb-12">
                    {currentItem.assunto}
                 </div>
 
                 {/* Nome do apresentador antes da cabeça */}
                 {(() => {
-                  const bl = blocos.find(b => String(b.id) === String(currentItem.bloco_id));
+                  const bl = blocos.find(b => b.id === currentItem.bloco_id);
                   return bl?.apresentador && (
-                    <div className="text-emerald-500 text-center mb-8 text-4xl border-2 border-emerald-500/20 py-4 rounded-xl bg-emerald-500/5">
+                    <div className="text-amber-400 text-center mb-12 text-6xl font-black border-2 border-amber-500/20 py-4 rounded-xl bg-amber-500/10">
                       [{bl.apresentador}]
                     </div>
                   );
@@ -909,7 +1070,7 @@ function TeleprompterPage() {
                     <div className="whitespace-pre-wrap leading-[1.25]">
                       {currentItem.cabeca}
                     </div>
-                    <div ref={rodaTvRef} className="text-emerald-500 text-center mt-12 text-4xl border-2 border-emerald-500/20 py-4 rounded-xl bg-emerald-500/5">
+                    <div ref={rodaTvRef} className="text-emerald-400 text-center mt-16 text-6xl font-black border-4 border-emerald-500/30 py-6 rounded-2xl bg-emerald-500/10">
                       [RODA TV]
                     </div>
                   </>

@@ -2,9 +2,7 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
-import { Newspaper, ShieldAlert } from "lucide-react";
-
-// Importação do hook de RBAC e Auth para blindar o formulário
+import { ShieldAlert } from "lucide-react";
 import { useRBAC } from "@/lib/rbac";
 import { Protected } from "@/components/Protected";
 
@@ -25,7 +23,6 @@ function SignupPage() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  // Validação de cargo: Apenas editores ou chefes podem registrar novos membros na redação
   const { role } = useRBAC();
   const podeCadastrarMembros = role === "editor" || role === "chefe_redacao" || role === "admin";
 
@@ -62,18 +59,17 @@ function SignupPage() {
     }
   };
 
-  // Se for um repórter tentando acessar a URL direta de cadastro, exibe tela de bloqueio
   if (!podeCadastrarMembros) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--bg-primary)] text-[var(--text-primary)] px-4">
-        <div className="w-full max-w-md text-center bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-3xl p-10 backdrop-blur-xl shadow-[var(--shadow-2xl)]">
-          <ShieldAlert className="h-12 w-12 text-[var(--status-error)] mx-auto mb-4" />
-          <h1 className="text-h2 font-bold tracking-tight text-[var(--text-primary)]">Acesso Restrito</h1>
-          <p className="text-body-sm text-[var(--text-tertiary)] mt-3 mb-6">
-            Apenas Editores ou Editores-chefe autorizados podem cadastrar e definir funções de novos colaboradores no DeskNews.
+      <div className="min-h-screen flex items-center justify-center bg-[#09090b] text-slate-100 px-4">
+        <div className="w-full max-w-md text-center border-l-4 border-[#ef4444] bg-[#0f0f12] border border-[#ef4444]/20 rounded-lg p-10 backdrop-blur-lg shadow-2xl">
+          <ShieldAlert className="h-12 w-12 text-[#ef4444] mx-auto mb-4" />
+          <h1 className="text-xl font-black tracking-tight text-white font-mono mb-2">ACESSO NEGADO</h1>
+          <p className="text-xs text-slate-400 mt-4 mb-6 uppercase tracking-widest">
+            Permissões insuficientes para cadastrar integrantes.
           </p>
-          <Link to="/pautas" className="inline-flex justify-center w-full py-3.5 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-[var(--text-primary)] font-semibold text-body-sm transition-all hover:bg-[var(--bg-overlay)]">
-            Voltar para as Pautas
+          <Link to="/pautas" className="inline-flex justify-center w-full py-3 rounded-md bg-[#ef4444]/10 border border-[#ef4444]/30 text-slate-100 font-mono uppercase text-xs tracking-wider transition-all hover:bg-[#ef4444]/20">
+            Voltar ao Painel
           </Link>
         </div>
       </div>
@@ -81,53 +77,81 @@ function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[var(--bg-primary)] text-[var(--text-primary)] px-4 font-sans selection:bg-[var(--accent-primary)]/30">
-      <div className="w-full max-w-sm animate-slide-up">
-        <div className="flex items-center gap-3 mb-10 justify-center group">
-          <div className="p-3 rounded-3xl bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/20 shadow-[var(--shadow-lg)]">
-            <Newspaper className="h-7 w-7 text-[var(--accent-primary)] transition-transform duration-500 group-hover:rotate-12" />
-          </div>
-          <span className="text-label text-[var(--text-primary)] tracking-[0.3em]">DeskNews</span>
+    <div className="min-h-screen flex items-center justify-center bg-[#09090b] text-slate-100 px-4 font-sans">
+      <div className="w-full max-w-sm">
+        <div className="flex items-center gap-2 mb-12 justify-center">
+          <div className="h-2 w-2 rounded-full bg-[#22c55e] animate-pulse"></div>
+          <span className="text-xs font-mono uppercase tracking-[0.2em] text-slate-400">Cadastro</span>
         </div>
-        <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] backdrop-blur-xl shadow-[var(--shadow-2xl)] rounded-3xl p-8 sm:p-10 transition-all duration-300 hover:border-[var(--border-medium)]">
-          <h1 className="text-h1 font-bold tracking-tight bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent">Novo integrante</h1>
-          <p className="text-body-sm text-[var(--text-tertiary)] mt-2 mb-8">Defina os dados e a função na redação.</p>
-          <form onSubmit={onSubmit} className="mt-6 space-y-5">
-            <div className="space-y-2">
-              <label htmlFor="name" className="text-label text-[var(--text-quaternary)]">Nome</label>
-              <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo do colaborador"
-                id="name"
-                className="w-full px-4 py-3.5 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300" />
+
+        <div className="border-l-4 border-[#22c55e] bg-[#0f0f12] border border-[#22c55e]/20 rounded-lg p-8 sm:p-10 backdrop-blur-lg shadow-2xl">
+          <h1 className="text-2xl font-black tracking-tight text-white mb-1 font-mono">NOVO MEMBRO</h1>
+          <p className="text-xs text-slate-500 mb-8 uppercase tracking-widest">Redação · Registro</p>
+
+          <form onSubmit={onSubmit} className="mt-8 space-y-5">
+            <div className="relative">
+              <label className="text-xs text-slate-500 font-mono uppercase tracking-widest mb-2 block">Nome</label>
+              <input 
+                required 
+                value={name} 
+                onChange={(e) => setName(e.target.value)} 
+                placeholder="Nome completo"
+                className="w-full px-4 py-3 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all duration-200 font-mono text-sm"
+              />
+              <div className="absolute bottom-0 right-0 h-px w-0 bg-[#22c55e] transition-all duration-500 group-focus-within:w-full"></div>
             </div>
-            <div className="space-y-2">
-              <label htmlFor="email" className="text-label text-[var(--text-quaternary)]">E-mail Corporativo</label>
-              <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="colaborador@jornal.com"
-                id="email"
-                className="w-full px-4 py-3.5 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300" />
+
+            <div className="relative">
+              <label className="text-xs text-slate-500 font-mono uppercase tracking-widest mb-2 block">E-mail</label>
+              <input 
+                type="email" 
+                required 
+                value={email} 
+                onChange={(e) => setEmail(e.target.value)} 
+                placeholder="user@jornal.com"
+                className="w-full px-4 py-3 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all duration-200 font-mono text-sm"
+              />
+              <div className="absolute inset-y-0 right-0 w-px bg-gradient-to-b from-[#22c55e]/0 via-[#22c55e] to-[#22c55e]/0 opacity-50"></div>
             </div>
-            <div className="space-y-2">
-              <label htmlFor="password" className="text-label text-[var(--text-quaternary)]">Senha Inicial</label>
-              <input type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres"
-                id="password"
-                className="w-full px-4 py-3.5 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300" />
+
+            <div className="relative">
+              <label className="text-xs text-slate-500 font-mono uppercase tracking-widest mb-2 block">Senha</label>
+              <input 
+                type="password" 
+                required 
+                minLength={6} 
+                value={password} 
+                onChange={(e) => setPassword(e.target.value)} 
+                placeholder="Mínimo 6 caracteres"
+                className="w-full px-4 py-3 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all duration-200 font-mono text-sm"
+              />
+              <div className="absolute inset-y-0 right-0 w-px bg-gradient-to-b from-[#22c55e]/0 via-[#22c55e] to-[#22c55e]/0 opacity-50"></div>
             </div>
-            <div className="space-y-1">
-              <label htmlFor="role" className="text-label text-[var(--text-quaternary)]">Função Editorial</label>
-              <select value={roleSelection} onChange={(e) => setRoleSelection(e.target.value)}
-                id="role"
-                className="w-full px-4 py-3.5 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-light)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] focus:ring-4 focus:ring-[var(--accent-primary)]/10 transition-all duration-300 appearance-none cursor-pointer">
+
+            <div className="relative">
+              <label className="text-xs text-slate-500 font-mono uppercase tracking-widest mb-2 block">Função</label>
+              <select 
+                value={roleSelection} 
+                onChange={(e) => setRoleSelection(e.target.value)}
+                className="w-full px-4 py-3 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all duration-200 appearance-none cursor-pointer font-mono text-sm"
+              >
                 <option value="reporter">Repórter</option>
                 <option value="editor">Editor de Bloco</option>
                 <option value="chefe_redacao">Editor-chefe</option>
               </select>
             </div>
-            <button type="submit" disabled={loading}
-              className="w-full py-3.5 mt-6 rounded-2xl bg-[var(--accent-primary)] text-white font-bold hover:shadow-[var(--shadow-xl)] transition-all duration-300 active:scale-[0.98] disabled:opacity-50 shadow-[var(--shadow-lg)]">
-              {loading ? "Registrando..." : "Cadastrar Membro"}
+
+            <button 
+              type="submit" 
+              disabled={loading}
+              className="w-full py-3 mt-8 rounded-md text-white font-black uppercase tracking-widest transition-all duration-300 active:scale-95 disabled:opacity-50 font-mono text-sm bg-[#22c55e]/10 border border-[#22c55e] hover:bg-[#22c55e]/20 hover:shadow-lg hover:shadow-[#22c55e]/20"
+            >
+              {loading ? "Registrando..." : "CADASTRAR"}
             </button>
           </form>
-          <div className="text-caption text-[var(--text-tertiary)] mt-6 text-center">
-            <Link to="/pautas" className="text-[var(--accent-primary)] hover:underline font-semibold">Voltar ao Painel Principal</Link>
+
+          <div className="text-xs text-slate-500 mt-6 text-center font-mono uppercase tracking-widest">
+            <Link to="/pautas" className="text-[#22c55e] hover:text-[#16a34a] transition-colors">Voltar ao Painel</Link>
           </div>
         </div>
       </div>
