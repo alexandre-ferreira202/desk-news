@@ -5,10 +5,7 @@
  */
 import { Client } from "@neondatabase/serverless";
 
-const DATABASE_URL =
-  const DATABASE_URL =
-  import.meta.env.VITE_DATABASE_URL as string ||
-  "postgresql://neondb_owner:npg_Dh7rLgCm2cyW@ep-weathered-pine-ac2fsgd5-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
+const DATABASE_URL = import.meta.env.VITE_DATABASE_URL as string;
 
 async function runQuery(q: string, params?: unknown[]): Promise<Row[]> {
   const client = new Client(DATABASE_URL);
