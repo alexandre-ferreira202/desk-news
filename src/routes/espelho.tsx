@@ -1,6 +1,24 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { db } from "@/lib/db";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import {
+  loadEspelho,
+  loadMaterias,
+  addBloco as addBlocoFn,
+  addItem as addItemFn,
+  addFromMateria as addFromMateriaFn,
+  addComercial as addComercialFn,
+  updateItem as updateItemFn,
+  updateBloco as updateBlocoFn,
+  delItem as delItemFn,
+  delBloco as delBlocoFn,
+  reorderItens,
+  updateMateriaEItem,
+  updateMateriaCabeca,
+  broadcastEditando as broadcastEditandoFn,
+  broadcastProducao as broadcastProducaoFn,
+  broadcastMaster as broadcastMasterFn,
+} from "@/functions/espelho.functions";
+import { useEspelhoRealtime } from "@/hooks/useEspelhoRealtime";
 import { toast } from "sonner";
 import { parseTimeToSeconds, formatSecondsToTime } from "@/lib/time";
 import {
@@ -128,32 +146,41 @@ function EspelhoPage() {
   const [modalCabeca, setModalCabeca] = useState<Item | null>(null);
   const [plannedEditorialDuration, setPlannedEditorialDuration] = useState("00:00");
   const [masterDuration, setMasterDuration] = useState("00:00");
-  // Set de IDs editando — alimentado por broadcast, visível em todos os browsers
-  const [editingItemIds, setEditingItemIds] = useState<Set<string>>(new Set());
-  const broadcastChannelRef = useRef<null>(null);
+  // Set de IDs editando — alimentado pelo Centrifugo, visível em todos os browsers
+  const { editingItemIds, connected: realtimeConnected } = useEspelhoRealtime({
+    url: import.meta.env.VITE_CENTRIFUGO_URL,
+    onEspelhoAlterado: () => load(),
+    onCabecaAtualizada: (payload) => {
+      // Mantém o estado local em sincronia mesmo antes do load() geral chegar,
+      // útil pro Teleprompter/Playout que escutam este mesmo evento.
+      setItens((prev) =>
+        prev.map((it) =>
+          it.id === payload.itemId
+            ? { ...it, cabeca: payload.cabeca, assunto: payload.assunto, tempo_cab: payload.tempo_cab }
+            : it
+        )
+      );
+    },
+    onProducaoAlterada: (payload) => setPlannedEditorialDuration(payload.valor),
+    onMasterAlterado: (payload) => setMasterDuration(payload.valor),
+  });
 
   const broadcastEditing = useCallback((itemId: string, editando: boolean) => {
-    broadcastChannelRef.current?.send({
-      type: "broadcast",
-      event: "editando",
-      payload: { itemId, editando },
-    });
+    broadcastEditandoFn({ data: { itemId, editando } }).catch((err) =>
+      console.error("Falha ao avisar edição em andamento:", err)
+    );
   }, []);
 
   const broadcastProducao = useCallback((valor: string) => {
-    broadcastChannelRef.current?.send({
-      type: "broadcast",
-      event: "producao",
-      payload: { valor },
-    });
+    broadcastProducaoFn({ data: { valor } }).catch((err) =>
+      console.error("Falha ao avisar mudança de produção:", err)
+    );
   }, []);
 
   const broadcastMaster = useCallback((valor: string) => {
-    broadcastChannelRef.current?.send({
-      type: "broadcast",
-      event: "master",
-      payload: { valor },
-    });
+    broadcastMasterFn({ data: { valor } }).catch((err) =>
+      console.error("Falha ao avisar mudança de master:", err)
+    );
   }, []);
 
   const sensors = useSensors(
@@ -164,50 +191,33 @@ function EspelhoPage() {
 
 
   const load = useCallback(async () => {
-    let sql = `SELECT * FROM espelho_blocos WHERE data_edicao = $1`;
-    const params: unknown[] = [date];
-    if (programa !== "Todos") {
-      sql += ` AND programa = $2`;
-      params.push(programa);
-    }
-    sql += ` ORDER BY ordem`;
-
-    const { rows: b } = await db.query(sql, params);
-    const loadedBlocos = (b ?? []) as Bloco[];
-    setBlocos(loadedBlocos);
-
-    if (loadedBlocos.length) {
-      const blocoIds = loadedBlocos.map((x) => x.id);
-      const placeholders = blocoIds.map((_, idx) => `$${idx + 1}`).join(", ");
-      const { rows: i } = await db.query(
-        `SELECT * FROM espelho_itens WHERE bloco_id IN (${placeholders}) ORDER BY ordem`,
-        blocoIds
-      );
-      setItens((i ?? []) as Item[]);
-    } else {
-      setItens([]);
+    try {
+      const { blocos: loadedBlocos, itens: loadedItens } = await loadEspelho({
+        data: { date, programa },
+      });
+      setBlocos(loadedBlocos as unknown as Bloco[]);
+      setItens(loadedItens as unknown as Item[]);
+    } catch (err: any) {
+      toast.error(err.message);
     }
   }, [date, programa]);
 
-  // ── Sincroniza mudanças do espelho via POLLING (Neon não tem realtime nativo) ──
+  // ── Sincroniza mudanças do espelho via Centrifugo (substitui o polling de 4s) ──
+  // O hook useEspelhoRealtime chama load() sozinho quando recebe ESPELHO_ALTERADO.
+  // Mantemos aqui só um fallback de baixa frequência, para o caso raro de a
+  // conexão websocket cair sem disparar "disconnected" a tempo.
   useEffect(() => {
+    if (realtimeConnected) return;
     const interval = setInterval(() => {
       load();
-    }, 4000); // recarrega a cada 4s
-
-    return () => {
-      clearInterval(interval);
-    };
-  }, [load]);
+    }, 15000); // fallback bem menos agressivo que os 4s antigos
+    return () => clearInterval(interval);
+  }, [load, realtimeConnected]);
 
   useEffect(() => {
-    db.query(
-      `SELECT id, titulo, status, cabeca, tempo_vt, tempo_cab, deixa, editor_texto, editor_imagem, credito_reporter, estrutura, corpo
-       FROM materias
-       WHERE status = $1
-       ORDER BY created_at DESC`,
-      ["publicado"]
-    ).then(({ rows }) => setMaterias((rows ?? []) as Materia[]));
+    loadMaterias()
+      .then((rows) => setMaterias(rows as unknown as Materia[]))
+      .catch((err: any) => toast.error(err.message));
 
     setProfiles([]);
   }, []);
@@ -220,10 +230,7 @@ function EspelhoPage() {
     const prog = programa !== "Todos" ? programa : "Jornal da Manhã";
     const ordem = blocos.length + 1;
     try {
-      await db.query(
-        `INSERT INTO espelho_blocos (data_edicao, nome, ordem, programa) VALUES ($1, $2, $3, $4)`,
-        [date, `Bloco ${ordem}`, ordem, prog]
-      );
+      await addBlocoFn({ data: { date, nome: `Bloco ${ordem}`, ordem, programa: prog } });
       load();
     } catch (err: any) {
       toast.error(err.message);
@@ -233,11 +240,16 @@ function EspelhoPage() {
   const addItem = async (bloco_id: string) => {
     const ordem = itens.filter((i) => i.bloco_id === bloco_id).length + 1;
     try {
-      await db.query(
-        `INSERT INTO espelho_itens (bloco_id, ordem, assunto, formato, tempo, tempo_cab)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [bloco_id, ordem, "Novo item", "VT", "1:30", "0:15"]
-      );
+      await addItemFn({
+        data: {
+          blocoId: bloco_id,
+          ordem,
+          assunto: "Novo item",
+          formato: "VT",
+          tempo: "1:30",
+          tempoCab: "0:15",
+        },
+      });
       load();
     } catch (err: any) {
       toast.error(err.message);
@@ -249,20 +261,18 @@ function EspelhoPage() {
     if (!m) return;
     const ordem = itens.filter((i) => i.bloco_id === bloco_id).length + 1;
     try {
-      await db.query(
-        `INSERT INTO espelho_itens (bloco_id, ordem, assunto, materia_id, formato, tempo, tempo_cab, cabeca)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
-          bloco_id,
+      await addFromMateriaFn({
+        data: {
+          blocoId: bloco_id,
           ordem,
-          m.titulo,
-          materia_id,
-          "VT",
-          m.tempo_vt ?? "1:30",
-          m.tempo_cab ?? "0:15",
-          m.cabeca ?? null,
-        ]
-      );
+          assunto: m.titulo,
+          materiaId: materia_id,
+          formato: "VT",
+          tempo: m.tempo_vt ?? "1:30",
+          tempoCab: m.tempo_cab ?? "0:15",
+          cabeca: m.cabeca ?? null,
+        },
+      });
       load();
     } catch (err: any) {
       toast.error(err.message);
@@ -272,11 +282,7 @@ function EspelhoPage() {
   const addComercial = async (bloco_id: string) => {
     const ordem = itens.filter((i) => i.bloco_id === bloco_id).length + 1;
     try {
-      await db.query(
-        `INSERT INTO espelho_itens (bloco_id, ordem, assunto, formato, tempo, tempo_cab, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [bloco_id, ordem, "INTERVALO COMERCIAL", "Comercial", "3:00", "0:00", "pronto"]
-      );
+      await addComercialFn({ data: { blocoId: bloco_id, ordem } });
       load();
     } catch (err: any) {
       toast.error(err.message);
@@ -284,15 +290,9 @@ function EspelhoPage() {
   };
 
   const updateItem = useCallback(async (id: string, patch: Partial<Item>) => {
-    const keys = Object.keys(patch);
-    if (!keys.length) return;
-    const setClause = keys.map((k, idx) => `${k} = $${idx + 1}`).join(", ");
-    const values = keys.map((k) => (patch as any)[k]);
+    if (!Object.keys(patch).length) return;
     try {
-      await db.query(
-        `UPDATE espelho_itens SET ${setClause} WHERE id = $${keys.length + 1}`,
-        [...values, id]
-      );
+      await updateItemFn({ data: { id, patch: patch as any } });
       load();
     } catch (err: any) {
       toast.error(err.message);
@@ -300,15 +300,9 @@ function EspelhoPage() {
   }, [load]);
 
   const updateBloco = async (id: string, patch: Partial<Bloco>) => {
-    const keys = Object.keys(patch);
-    if (!keys.length) return;
-    const setClause = keys.map((k, idx) => `${k} = $${idx + 1}`).join(", ");
-    const values = keys.map((k) => (patch as any)[k]);
+    if (!Object.keys(patch).length) return;
     try {
-      await db.query(
-        `UPDATE espelho_blocos SET ${setClause} WHERE id = $${keys.length + 1}`,
-        [...values, id]
-      );
+      await updateBlocoFn({ data: { id, patch: patch as any } });
       load();
     } catch (err: any) {
       toast.error(err.message);
@@ -317,14 +311,22 @@ function EspelhoPage() {
 
   const delItem = async (id: string) => {
     if (!window.confirm("Tem certeza que deseja remover este item do espelho?")) return;
-    await db.query(`DELETE FROM espelho_itens WHERE id = $1`, [id]);
-    load();
+    try {
+      await delItemFn({ data: { id } });
+      load();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
   };
 
   const delBloco = async (id: string) => {
     if (!window.confirm("Isso apagará o bloco e todos os itens dentro dele. Confirmar?")) return;
-    await db.query(`DELETE FROM espelho_blocos WHERE id = $1`, [id]);
-    load();
+    try {
+      await delBlocoFn({ data: { id } });
+      load();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
   };
 
   const activeGlobalIndex = useMemo(() => {
@@ -450,14 +452,19 @@ function EspelhoPage() {
 
     setItens(newItens);
 
-    await Promise.all(
-      newItens.map((item) =>
-        db.query(
-          `UPDATE espelho_itens SET ordem = $1, bloco_id = $2 WHERE id = $3`,
-          [item.ordem, item.bloco_id, item.id]
-        )
-      )
-    );
+    try {
+      await reorderItens({
+        data: {
+          itens: newItens.map((item) => ({
+            id: item.id,
+            ordem: item.ordem,
+            bloco_id: item.bloco_id,
+          })),
+        },
+      });
+    } catch (err: any) {
+      toast.error(err.message);
+    }
     load();
   };
 
@@ -777,7 +784,6 @@ function EspelhoPage() {
                             onDelete={delItem}
                             onSelectMateria={(m, i) => {
                               broadcastEditing(i.id, true);
-                              setEditingItemIds((prev) => new Set(prev).add(i.id));
                               setModalMateria({ materia: m, item: i });
                             }}
                             onSelectCabeca={(i: Item) => setModalCabeca(i)}
@@ -814,48 +820,30 @@ function EspelhoPage() {
           item={modalMateria.item}
           onClose={() => setModalMateria(null)}
           onSave={async (updated) => {
-            await db.query(
-              `UPDATE materias SET titulo = $1, cabeca = $2, tempo_vt = $3, tempo_cab = $4,
-                deixa = $5, estrutura = $6, corpo = $7, credito_reporter = $8
-               WHERE id = $9`,
-              [
-                updated.titulo,
-                updated.cabeca,
-                updated.tempo_vt,
-                updated.tempo_cab,
-                updated.deixa,
-                updated.estrutura,
-                updated.corpo,
-                updated.credito_reporter,
-                updated.id,
-              ]
-            );
-            await updateItem(modalMateria.item.id, {
-              assunto: updated.titulo,
-              cabeca: updated.cabeca,
-              tempo_cab: updated.tempo_cab,
-              tempo: updated.tempo_vt,
-              status: "pronto",
-            });
-            // Broadcast para o TP atualizar o texto instantaneamente (sem esperar postgres)
-            broadcastChannelRef.current?.send({
-              type: "broadcast",
-              event: "cabeca_atualizada",
-              payload: {
-                itemId: modalMateria.item.id,
-                cabeca: updated.cabeca ?? "",
-                assunto: updated.titulo,
-                tempo_cab: updated.tempo_cab ?? "0:00",
-              },
-            });
-            broadcastEditing(modalMateria.item.id, false);
-            setEditingItemIds((prev) => {
-              const next = new Set(prev);
-              next.delete(modalMateria.item.id);
-              return next;
-            });
-            setModalMateria(null);
-            toast.success("Matéria salva!");
+            try {
+              await updateMateriaEItem({
+                data: {
+                  id: updated.id,
+                  itemId: modalMateria.item.id,
+                  titulo: updated.titulo,
+                  cabeca: updated.cabeca,
+                  tempoVt: updated.tempo_vt,
+                  tempoCab: updated.tempo_cab,
+                  deixa: updated.deixa,
+                  estrutura: updated.estrutura,
+                  corpo: updated.corpo,
+                  creditoReporter: updated.credito_reporter,
+                },
+              });
+              // O evento CABECA_ATUALIZADA já é publicado pelo server function
+              // assim que o banco confirma — o Teleprompter/Playout recebem via
+              // Centrifugo sem precisar de broadcast manual aqui.
+              broadcastEditing(modalMateria.item.id, false);
+              setModalMateria(null);
+              toast.success("Matéria salva!");
+            } catch (err: any) {
+              toast.error(err.message);
+            }
           }}
         />
       )}
@@ -869,10 +857,19 @@ function EspelhoPage() {
           onSave={async (id, assunto, cabeca, tempoCab, tempoVt, reporter) => {
             await updateItem(id, { assunto, cabeca, tempo_cab: tempoCab, tempo: tempoVt });
             if (modalCabeca.materia_id) {
-              await db.query(
-                `UPDATE materias SET credito_reporter = $1, cabeca = $2, tempo_cab = $3, tempo_vt = $4 WHERE id = $5`,
-                [reporter, cabeca, tempoCab, tempoVt, modalCabeca.materia_id]
-              );
+              try {
+                await updateMateriaCabeca({
+                  data: {
+                    materiaId: modalCabeca.materia_id,
+                    creditoReporter: reporter,
+                    cabeca,
+                    tempoCab,
+                    tempoVt,
+                  },
+                });
+              } catch (err: any) {
+                toast.error(err.message);
+              }
             }
             setModalCabeca(null);
           }}

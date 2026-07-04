@@ -1044,12 +1044,15 @@ function PlayoutPage() {
   const laudaSnapshotRef = useRef<ItemLauda[]>([]);
   const sonorasSnapshotRef = useRef<Sonora[]>([]);
   const estruturaSnapshotRef = useRef<string>("");
+  // Timecodes salvos na Redação — quando presente, tem prioridade sobre IA/fallback
+  const timelineJsonRef = useRef<Array<{ tipo: string; valor: string; timecode: number; duracao: number }> | null>(null);
 
   useEffect(() => {
     if (!materiaAtual?.materia_id || !pgmFile?.duration) {
       sonorasMapRef.current.clear();
       sonorasDisparadosRef.current.clear();
       setSonorasTimeline([]);
+      timelineJsonRef.current = null;
       return;
     }
 
@@ -1057,6 +1060,23 @@ function PlayoutPage() {
     laudaSnapshotRef.current = materiaAtual.itensLauda;
     sonorasSnapshotRef.current = materiaAtual.sonoras || [];
     estruturaSnapshotRef.current = (materiaAtual as any)._estrutura || "";
+
+    // ── Se a Redação tem timecodes salvos, usa direto — sem IA nem fallback ──
+    if (timelineJsonRef.current && timelineJsonRef.current.length > 0) {
+      const map = new Map<string, { inicio: number; duracao: number }>();
+      const timeline: typeof sonorasTimeline = [];
+      timelineJsonRef.current.forEach((c) => {
+        const funcao = c.tipo.replace("ED_TEXTO", "ED. TEXTO").replace("ED_IMAGEM", "ED. IMAGEM");
+        const key = `${c.valor}|${funcao}`;
+        map.set(key, { inicio: c.timecode, duracao: c.duracao ?? 5 });
+        timeline.push({ nome: c.valor, funcao, timecodeInicio: c.timecode, duracao: c.duracao ?? 5 });
+      });
+      sonorasMapRef.current = map;
+      sonorasDisparadosRef.current.clear();
+      setSonorasTimeline(timeline);
+      console.log(`⏱️ useEffect: ${timeline.length} timecode(s) do timeline_json aplicados (VT=${pgmFile.duration}s)`);
+      return;
+    }
 
     const aplicarTimeline = (creditosTimeline: CreditoTimeline[], resetDisparados = true) => {
       const map = new Map<string, { inicio: number; duracao: number }>();
@@ -1954,7 +1974,7 @@ function PlayoutPage() {
             // Busca matéria + tempo previsto do item no espelho (para calcular timecodes mesmo sem o VT carregado)
             const [{ rows }, { rows: itemRows }] = await Promise.all([
               db.query(
-                `SELECT id, titulo, editor_texto, editor_imagem, credito_reporter, estrutura
+                `SELECT id, titulo, editor_texto, editor_imagem, credito_reporter, estrutura, timeline_json, duracao_vt
                  FROM materias WHERE id = $1`,
                 [materiaId]
               ),
@@ -1965,25 +1985,45 @@ function PlayoutPage() {
             const data = rows?.[0];
 
             if (data) {
-              const { sonoras, passagens, producao, itensLauda } = parsarSonorasEPassagens(data.estrutura);
+              const { sonoras, passagens, producao, itensLauda: itensEstrutura } = parsarSonorasEPassagens(data.estrutura);
               setGcLine1(""); setGcLine2(""); setGcCreditsQueue([]); setGcVisible(false);
               setRemovedLaudaOrdens((prev) => { const n = { ...prev }; delete n[data.id]; return n; });
 
-              const creditsList: { line1: string; line2: string }[] = [];
-              if (data.editor_texto) creditsList.push({ line1: data.editor_texto, line2: "ED. TEXTO" });
-              if (data.editor_imagem) creditsList.push({ line1: data.editor_imagem, line2: "ED. IMAGEM" });
-              if (data.credito_reporter) creditsList.push({ line1: data.credito_reporter, line2: "REPÓRTER" });
+              // ── Prioriza timeline_json salvo na Redação ──
+              let creditsList: { line1: string; line2: string }[] = [];
+              let itensLauda = itensEstrutura;
+              let timelineJsonParsed: Array<{ id: string; tipo: string; valor: string; timecode: number; duracao: number }> | null = null;
+              if (data.timeline_json) {
+                try { timelineJsonParsed = JSON.parse(data.timeline_json); } catch { timelineJsonParsed = null; }
+              }
 
-              // Garante que ED.TEXTO/ED.IMAGEM/REPÓRTER entrem na lauda p/ posicionamento automático
-              let laudaOrdem = itensLauda.length;
-              if (data.editor_texto && !itensLauda.some((it) => it.tipo === "ED_TEXTO")) {
-                itensLauda.push({ tipo: "ED_TEXTO", nome: "ED_TEXTO", valor: data.editor_texto, ordem: laudaOrdem++ });
-              }
-              if (data.editor_imagem && !itensLauda.some((it) => it.tipo === "ED_IMAGEM")) {
-                itensLauda.push({ tipo: "ED_IMAGEM", nome: "ED_IMAGEM", valor: data.editor_imagem, ordem: laudaOrdem++ });
-              }
-              if (data.credito_reporter && !itensLauda.some((it) => it.tipo === "REPÓRTER")) {
-                itensLauda.push({ tipo: "REPÓRTER", nome: "REPÓRTER", valor: data.credito_reporter, ordem: laudaOrdem++ });
+              if (timelineJsonParsed && timelineJsonParsed.length > 0) {
+                timelineJsonRef.current = timelineJsonParsed;
+                // Substitui completamente a lauda pelos créditos revisados na Redação
+                itensLauda = timelineJsonParsed.map((c, idx) => ({
+                  tipo: c.tipo as any,
+                  nome: c.tipo,
+                  valor: c.valor,
+                  ordem: idx,
+                }));
+                creditsList = timelineJsonParsed.map((c) => ({
+                  line1: c.valor,
+                  line2: c.tipo.replace("ED_TEXTO", "ED. TEXTO").replace("ED_IMAGEM", "ED. IMAGEM"),
+                }));
+                console.log("[Playout] RODA_VT: usando timeline_json da Redação →", creditsList.length, "créditos");
+              } else {
+                // Fallback: campos simples da matéria
+                if (data.editor_texto) creditsList.push({ line1: data.editor_texto, line2: "ED. TEXTO" });
+                if (data.editor_imagem) creditsList.push({ line1: data.editor_imagem, line2: "ED. IMAGEM" });
+                if (data.credito_reporter) creditsList.push({ line1: data.credito_reporter, line2: "REPÓRTER" });
+                let laudaOrdem = itensLauda.length;
+                if (data.editor_texto && !itensLauda.some((it) => it.tipo === "ED_TEXTO"))
+                  itensLauda.push({ tipo: "ED_TEXTO", nome: "ED_TEXTO", valor: data.editor_texto, ordem: laudaOrdem++ });
+                if (data.editor_imagem && !itensLauda.some((it) => it.tipo === "ED_IMAGEM"))
+                  itensLauda.push({ tipo: "ED_IMAGEM", nome: "ED_IMAGEM", valor: data.editor_imagem, ordem: laudaOrdem++ });
+                if (data.credito_reporter && !itensLauda.some((it) => it.tipo === "REPÓRTER"))
+                  itensLauda.push({ tipo: "REPÓRTER", nome: "REPÓRTER", valor: data.credito_reporter, ordem: laudaOrdem++ });
+                console.log("[Playout] RODA_VT: timeline_json ausente, usando campos da matéria →", creditsList.length, "créditos");
               }
 
               setGcCreditsQueue(creditsList);
@@ -1998,10 +2038,24 @@ function PlayoutPage() {
               } as any);
               console.log("[Playout] RODA_VT: lauda carregada →", data.titulo);
 
-              // ── Calcula timecodes via IA imediatamente usando duração prevista do espelho ──
-              // Isso garante que os créditos já vêm posicionados quando o [roda tv] é detectado,
-              // sem precisar esperar o arquivo VT ser carregado e ter sua duração lida.
-              if (data.estrutura && itensLauda.length > 0) {
+              // ── Timecodes: usa timeline_json salvo ou calcula via IA ──
+              if (timelineJsonParsed && timelineJsonParsed.length > 0) {
+                // Usa os timecodes exatos salvos na Redação — sem recalcular
+                const map = new Map<string, { inicio: number; duracao: number }>();
+                const tl: typeof sonorasTimeline = [];
+                timelineJsonParsed.forEach((c) => {
+                  const key = `${c.valor}|${c.tipo.replace("ED_TEXTO", "ED. TEXTO").replace("ED_IMAGEM", "ED. IMAGEM")}`;
+                  map.set(key, { inicio: c.timecode, duracao: c.duracao ?? 5 });
+                  tl.push({ nome: c.valor, funcao: c.tipo.replace("ED_TEXTO", "ED. TEXTO").replace("ED_IMAGEM", "ED. IMAGEM"), timecodeInicio: c.timecode, duracao: c.duracao ?? 5 });
+                });
+                laudaSnapshotRef.current = itensLauda;
+                sonorasSnapshotRef.current = sonoras;
+                estruturaSnapshotRef.current = data.estrutura;
+                sonorasMapRef.current = map;
+                sonorasDisparadosRef.current.clear();
+                setSonorasTimeline(tl);
+                console.log(`[Playout] RODA_VT: ${tl.length} timecode(s) do timeline_json aplicados diretamente`);
+              } else if (data.estrutura && itensLauda.length > 0) {
                 // Duração prevista: pega do item do espelho (ex: "1:30") ou fallback de 90s
                 const tempoEspelho = itemRows?.[0]?.tempo as string | undefined;
                 let duracaoPrevia = 90; // fallback
@@ -2050,7 +2104,7 @@ function PlayoutPage() {
                     toast.success(`⏱ ${creditosIA.length} crédito(s) posicionados pela IA`, { duration: 2500 });
                   })
                   .catch((err) => console.warn("[Playout] RODA_VT: IA de timecodes falhou:", err));
-              }
+              } // fecha else (sem timeline_json)
 
               if (data.estrutura) {
                 extractCredits(data.estrutura, data.editor_texto || undefined, data.credito_reporter || undefined)
@@ -2170,7 +2224,7 @@ function PlayoutPage() {
       console.log("🔍 Buscando matéria com ID:", item.materia_id);
       
       const { rows: materiaRows } = await db.query(
-        `SELECT id, titulo, editor_texto, editor_imagem, credito_reporter, estrutura
+        `SELECT id, titulo, editor_texto, editor_imagem, credito_reporter, estrutura, timeline_json, duracao_vt
          FROM materias WHERE id = $1`,
         [item.materia_id]
       );
@@ -2202,19 +2256,38 @@ function PlayoutPage() {
         return novo;
       });
 
-      // 🆕 Montar fila de créditos baseado nos dados da matéria
-      const creditsList = [];
-      if (data.editor_texto) creditsList.push({ line1: data.editor_texto, line2: "ED. TEXTO" });
-      if (data.editor_imagem) creditsList.push({ line1: data.editor_imagem, line2: "ED. IMAGEM" });
-      if (data.credito_reporter) creditsList.push({ line1: data.credito_reporter, line2: "REPÓRTER" });
+      // ── Prioriza timeline_json salvo na Redação ──
+      let creditsList: { line1: string; line2: string }[] = [];
+      let timelineJsonParsed: Array<{ id: string; tipo: string; valor: string; timecode: number; duracao: number }> | null = null;
+      if (data.timeline_json) {
+        try { timelineJsonParsed = JSON.parse(data.timeline_json); } catch { timelineJsonParsed = null; }
+      }
 
-      console.log("📋 Créditos carregados:", { editor_texto: data.editor_texto, editor_imagem: data.editor_imagem, credito_reporter: data.credito_reporter, creditsList });
+      if (timelineJsonParsed && timelineJsonParsed.length > 0) {
+        timelineJsonRef.current = timelineJsonParsed;
+        // Substitui completamente a lauda pelos créditos revisados na Redação
+        itensLauda.length = 0;
+        timelineJsonParsed.forEach((c, idx) => {
+          itensLauda.push({ tipo: c.tipo as any, nome: c.tipo, valor: c.valor, ordem: idx });
+        });
+        creditsList = timelineJsonParsed.map((c) => ({
+          line1: c.valor,
+          line2: c.tipo.replace("ED_TEXTO", "ED. TEXTO").replace("ED_IMAGEM", "ED. IMAGEM"),
+        }));
+        console.log("[Playout] Drag: usando timeline_json da Redação →", creditsList.length, "créditos");
+      } else {
+        timelineJsonRef.current = null;
+        if (data.editor_texto) creditsList.push({ line1: data.editor_texto, line2: "ED. TEXTO" });
+        if (data.editor_imagem) creditsList.push({ line1: data.editor_imagem, line2: "ED. IMAGEM" });
+        if (data.credito_reporter) creditsList.push({ line1: data.credito_reporter, line2: "REPÓRTER" });
+        let laudaOrdem = itensLauda.length;
+        creditsList.forEach(cred => {
+          itensLauda.push({ tipo: cred.line2.replace("ED. ", "ED_") as any, nome: cred.line2, valor: cred.line1, ordem: laudaOrdem++ });
+        });
+        console.log("[Playout] Drag: timeline_json ausente, usando campos da matéria →", creditsList.length, "créditos");
+      }
 
-      // Adiciona os créditos de produção na lauda visual
-      let laudaOrdem = itensLauda.length;
-      creditsList.forEach(cred => {
-        itensLauda.push({ tipo: cred.line2.replace('ED. ', 'ED_') as any, nome: cred.line2, valor: cred.line1, ordem: laudaOrdem++ });
-      });
+      console.log("📋 Créditos carregados:", creditsList);
 
       // Popula a fila e pré-carrega o primeiro no input
       setGcCreditsQueue(creditsList);
