@@ -73,7 +73,7 @@ function getResponse() {
 }
 var HEADERS = { TSS_SHELL: "X-TSS_SHELL" };
 async function getStartManifest(matchedRoutes) {
-  const { tsrStartManifest } = await import("./_tanstack-start-manifest_v-B5aajY15.js");
+  const { tsrStartManifest } = await import("./_tanstack-start-manifest_v-DXAKQQWD.js");
   const startManifest = tsrStartManifest();
   let routes = startManifest.routes;
   routes[rootRouteId];
@@ -93,9 +93,73 @@ async function getStartManifest(matchedRoutes) {
   };
 }
 const manifest = {
-  "5b84dd6bae09f625244fad5fee7756a6109e2c06693485ab5f78995fc67389e4": {
+  "02b340d196a1cac93179b621254e4b76fafbcb39c3d96087419ff1de604c3fe1": {
+    functionName: "loadMaterias_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "05206c0ea5ee2dbef8f0e147d764c9a0a8647aed9ff6d01fb30f7ccb3a251f24": {
+    functionName: "addItem_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "0f3b8b65b3951001b4da7c739479f2f80ac1887d404fe1a9f850840fa06b658e": {
+    functionName: "broadcastProducao_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "224d8c768f3347c3f92d8983ddcd1244e81d568dd276a4659cc8c39c1898b39e": {
+    functionName: "addFromMateria_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "54ac081fb504d07b3a29cac2a582670dc34737ca258bb889caaeed7436f52cc5": {
+    functionName: "addBloco_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "6034dd0900db6c82937769838ab5d6fdcc8e82e37dc57b0b4272a29ebbfcc5a2": {
     functionName: "fetchPortais_createServerFn_handler",
-    importer: () => import("./portais.functions-0QcWx_uw.js")
+    importer: () => import("./portais.functions-0HKd9OQs.js")
+  },
+  "7657aadb3a18b1a18cb604d675a07f98629860ad77a46a46264defe4d5c76737": {
+    functionName: "delItem_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "76697f6fd832e8c2a55dd188ccdf151da4738fe43ff84d5bcc9b0c49fd4b1d2e": {
+    functionName: "loadEspelho_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "7f1d56274cffa9b6934a112fd197f1f53209925fa7eb845d0f1dc5d31956b016": {
+    functionName: "updateItem_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "8df2436ef554a087e2de1c841e8ab42faaca65d80f6cdaeebd69c88fb358d5a7": {
+    functionName: "addComercial_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "982fe5ea074e7409ca8099d9e9fe41f7279adaee720fdc01dc861da661f741ce": {
+    functionName: "delBloco_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "ae0445be6b84652a5b906effc406ba66ea85da15802c02a53a0a00b54a174e60": {
+    functionName: "reorderItens_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "d5898cc85174aad5305ae6a9f622f5768735b9bb0fa71af69cfb51bcb0531269": {
+    functionName: "updateBloco_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "d97383b80276641d5a3ba2191809466e454aa6acf75bb376458ece566a1ac587": {
+    functionName: "broadcastEditando_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "d97694f4dec741742a883b467a95412cb79eedec23478a722759a5b004147a13": {
+    functionName: "updateMateriaCabeca_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "de3a2cccd4cb23d0e00573cf8246aee2749ee24ba85cd5e587bdd8ad6a06e866": {
+    functionName: "broadcastMaster_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
+  },
+  "e85925fb0da56b65110381c18b0278fce387e431af975bab11c552a6178fa9fc": {
+    functionName: "updateMateriaEItem_createServerFn_handler",
+    importer: () => import("./espelho.functions-BG-FR5Ck.js")
   }
 };
 async function getServerFnById(id, access) {
@@ -1336,8 +1400,8 @@ var getBaseManifest = getProdBaseManifest;
 var createEarlyHintsForRequest = createEarlyHintsCollector;
 async function loadEntries() {
   const [routerEntry, startEntry, pluginAdapters] = await Promise.all([
-    import("./router-BrC3OlEq.js"),
-    import("./start-CQZMsEzP.js"),
+    import("./router-NcdNWgek.js").then((n) => n.r),
+    import("./start-HQocwzo9.js"),
     import("./empty-plugin-adapters-BFgPZ6_d.js")
   ]);
   return {
@@ -1709,8 +1773,8 @@ const server = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
 }, Symbol.toStringTag, { value: "Module" }));
 export {
   TSS_SERVER_FUNCTION as T,
-  createMiddleware as a,
-  createServerFn as c,
+  createServerFn as a,
+  createMiddleware as c,
   getServerFnById as g,
   server as s
 };

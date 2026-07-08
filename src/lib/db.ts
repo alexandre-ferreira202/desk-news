@@ -3,7 +3,14 @@
  * Query builder compatível com a interface do Supabase,
  * mas executando no Neon via @neondatabase/serverless.
  */
-import { Client } from "@neondatabase/serverless";
+import { Client, neonConfig } from "@neondatabase/serverless";
+
+// Configura WebSocket para Node.js (dev local)
+// Em Cloudflare Workers, o runtime já provê WebSocket nativo
+if (typeof process !== "undefined" && process.versions?.node) {
+  const { default: ws } = await import("ws");
+  neonConfig.webSocketConstructor = ws;
+}
 
 const DATABASE_URL = import.meta.env.VITE_DATABASE_URL as string;
 

@@ -49,13 +49,16 @@ function MetricasPage() {
 
   return (
     <div className="min-h-screen p-4 sm:p-6 bg-[#09090b] text-slate-100 font-sans">
-      <div className="mb-8">
-        <p className="text-xs text-slate-600 font-mono uppercase tracking-widest mb-2">Sistema de Análise</p>
+      <div className="border-b border-[#22c55e]/20 pb-4 mb-8">
+        <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#22c55e] mb-1">
+          {new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" }).toUpperCase()}
+        </p>
+        <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#6b7280] mb-2">Sistema de Análise</p>
         <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center h-9 w-9 rounded-md bg-[#22c55e]/10 border border-[#22c55e]/40">
+          <div className="flex items-center justify-center h-10 w-10 rounded-md bg-[#22c55e]/10 border border-[#22c55e]/40">
             <BarChart3 className="h-5 w-5 text-[#22c55e]" />
           </div>
-          <h1 className="text-3xl font-black tracking-tight font-mono uppercase text-white">MÉTRICAS</h1>
+          <h1 className="text-3xl sm:text-4xl font-black tracking-tight font-mono uppercase text-white">MÉTRICAS</h1>
         </div>
       </div>
 

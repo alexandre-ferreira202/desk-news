@@ -1,4 +1,5 @@
-import { T as TSS_SERVER_FUNCTION, c as createServerFn } from "./server-BqZ-7n4X.js";
+import { c as createServerRpc } from "./createServerRpc-BJVsDShk.js";
+import { a as createServerFn } from "./server-BA6c70hh.js";
 import "node:async_hooks";
 import "h3-v2";
 import "@tanstack/router-core";
@@ -10,14 +11,6 @@ import "react";
 import "@tanstack/react-router";
 import "react/jsx-runtime";
 import "@tanstack/react-router/ssr/server";
-var createServerRpc = (serverFnMeta, splitImportFn) => {
-  const url = "/_serverFn/" + serverFnMeta.id;
-  return Object.assign(splitImportFn, {
-    url,
-    serverFnMeta,
-    [TSS_SERVER_FUNCTION]: true
-  });
-};
 const PORTAIS = [{
   name: "G1 Maranhão",
   url: "https://g1.globo.com/rss/g1/ma/"
@@ -79,9 +72,9 @@ function parseRss(xml) {
   return items;
 }
 const fetchPortais_createServerFn_handler = createServerRpc({
-  id: "5b84dd6bae09f625244fad5fee7756a6109e2c06693485ab5f78995fc67389e4",
+  id: "6034dd0900db6c82937769838ab5d6fdcc8e82e37dc57b0b4272a29ebbfcc5a2",
   name: "fetchPortais",
-  filename: "../../../Downloads/newsflow-studio/newsflow-studio-main/src/lib/portais.functions.ts"
+  filename: "src/lib/portais.functions.ts"
 }, (opts) => fetchPortais.__executeServer(opts));
 const fetchPortais = createServerFn({
   method: "GET"

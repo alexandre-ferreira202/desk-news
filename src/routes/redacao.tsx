@@ -734,11 +734,16 @@ ${estrutura}`;
       {/* Sidebar esquerda */}
       <aside className="w-80 bg-[#141416] border-r border-[#22c55e]/20 overflow-y-auto flex flex-col">
         <div className="sticky top-0 bg-[#09090b] border-b border-[#22c55e]/20 p-4 space-y-3 z-10">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center h-9 w-9 rounded-md bg-[#22c55e]/10 border border-[#22c55e]/40">
-              <PenTool className="h-5 w-5 text-[#22c55e]" />
+          <div>
+            <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#22c55e] mb-1">
+              {new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" }).toUpperCase()}
+            </p>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center h-10 w-10 rounded-md bg-[#22c55e]/10 border border-[#22c55e]/40">
+                <PenTool className="h-5 w-5 text-[#22c55e]" />
+              </div>
+              <h1 className="text-3xl font-black tracking-tight font-mono uppercase text-white">REDAÇÃO</h1>
             </div>
-            <h1 className="text-2xl font-black tracking-tight font-mono uppercase text-white">REDAÇÃO</h1>
           </div>
           
           <div className="relative">

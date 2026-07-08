@@ -1,0 +1,1 @@
+function o(t){if(!t)return 0;const[n,r]=t.split(":").map(Number);return(n||0)*60+(r||0)}function s(t){const n=Math.floor(t/60),r=Math.round(t%60);return`${String(n).padStart(2,"0")}:${String(r).padStart(2,"0")}`}export{s as f,o as p};

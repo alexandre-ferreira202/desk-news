@@ -9,11 +9,12 @@ import { getSession, signOut } from "@/lib/auth";
 import type { SessionUser } from "@/lib/auth";
 
 const nav = [
-  { to: "/pautas",     label: "Pautas",       icon: LayoutGrid },
-  { to: "/redacao",    label: "Reportagens",   icon: FileText },
+  { to: "/dashboard",  label: "Dashboard",     icon: LayoutGrid },
+  { to: "/pautas",     label: "Pautas",        icon: FileText },
+  { to: "/redacao",    label: "Reportagens",   icon: Newspaper },
   { to: "/espelho",    label: "Espelho",       icon: MonitorPlay },
-  { to: "/relatorios", label: "Relatorios",    icon: ClipboardList },
-  { to: "/metricas",   label: "Metricas",      icon: BarChart3 },
+  { to: "/relatorios", label: "Relatórios",    icon: ClipboardList },
+  { to: "/metricas",   label: "Métricas",      icon: BarChart3 },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -40,13 +41,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const sidebar = (
     <>
-      <div className="px-5 py-5 border-b border-[var(--border-subtle)] flex items-center justify-between">
+      <div className="px-4 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <div className="p-2 rounded-xl bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/20">
-              <Newspaper className="h-4 w-4 text-[var(--accent-primary)]" />
-            </div>
-            <span className="font-mono uppercase tracking-widest text-body-sm text-[var(--text-primary)]">DeskNews</span>
+            <img src="/logo1.png" alt="DeskNews" className="h-9 opacity-90" />
           </div>
           <div className="mt-2 flex items-center gap-2 text-label text-[var(--text-tertiary)]">
             <span className="live-dot" /> Ao vivo
@@ -133,14 +131,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen flex w-full bg-[var(--bg-primary)] text-[var(--text-primary)]">
-      <aside className="hidden md:flex w-64 shrink-0 bg-[var(--glass-bg)] backdrop-blur-xl border-r border-[var(--glass-border)] flex-col shadow-[var(--shadow-lg)]">
+      <aside className="hidden md:flex w-[220px] shrink-0 bg-[var(--glass-bg)] backdrop-blur-xl border-r border-[var(--glass-border)] flex-col shadow-[var(--shadow-lg)]">
         {sidebar}
       </aside>
 
       {open && (
         <div className="md:hidden fixed inset-0 z-50 flex">
           <div className="absolute inset-0 bg-[var(--bg-primary)]/70 backdrop-blur-sm" onClick={() => setOpen(false)} />
-          <aside className="relative w-64 max-w-[80vw] bg-[var(--glass-bg)] backdrop-blur-xl border-r border-[var(--glass-border)] flex flex-col animate-in slide-in-from-left">
+          <aside className="relative w-[220px] max-w-[80vw] bg-[var(--glass-bg)] backdrop-blur-xl border-r border-[var(--glass-border)] flex flex-col animate-in slide-in-from-left">
             {sidebar}
           </aside>
         </div>

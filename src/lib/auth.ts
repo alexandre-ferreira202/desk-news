@@ -94,3 +94,35 @@ async function verificarBcrypt(senha: string, hash: string): Promise<boolean> {
   // Para habilitar bcrypt real: npm install bcryptjs e usar bcryptjs.compare
   return hash === senha;
 }
+
+// ─── React hook ───────────────────────────────────────────────────────────────
+import { useState, useEffect, useCallback } from "react";
+
+export function useAuth() {
+  const [user, setUser] = useState<SessionUser | null>(() => getSession());
+  const [loading, setLoading] = useState(false);
+
+  // Sync across tabs / windows
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === SESSION_KEY) setUser(e.newValue ? JSON.parse(e.newValue) : null);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  const login = useCallback(async (email: string, password: string) => {
+    setLoading(true);
+    const result = await signIn(email, password);
+    setLoading(false);
+    if (result.user) setUser(result.user);
+    return result;
+  }, []);
+
+  const logout = useCallback(async () => {
+    await signOut();
+    setUser(null);
+  }, []);
+
+  return { user, loading, login, logout };
+}

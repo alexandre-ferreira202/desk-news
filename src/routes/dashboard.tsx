@@ -179,10 +179,16 @@ function Dashboard() {
       </div>
 
       <div className="relative z-10 p-4 md:p-8">
-        <div className="flex items-center gap-3 mb-8 border-b border-[#22c55e]/20 pb-4">
-          <div className="h-2 w-2 rounded-full bg-[#22c55e] animate-pulse"></div>
-          <h1 className="text-2xl md:text-3xl font-black tracking-tight font-mono uppercase">Dashboard</h1>
-          <span className="text-xs text-slate-500 font-mono ml-auto hidden md:inline">ON AIR</span>
+        <div className="border-b border-[#22c55e]/20 pb-4 mb-8">
+          <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#22c55e] mb-1">
+            {new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" }).toUpperCase()}
+          </p>
+          <div className="flex items-center gap-3">
+            <div className="h-2 w-2 rounded-full bg-[#22c55e] animate-pulse shrink-0" />
+            <h1 className="text-3xl md:text-4xl font-black tracking-tight font-mono uppercase text-white">Dashboard</h1>
+            <span className="text-[#6b7280] font-mono text-2xl font-light select-none">—</span>
+            <img src="/logo1.png" alt="DeskNews" className="h-6 opacity-80" />
+          </div>
         </div>
 
         {loading ? (

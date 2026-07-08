@@ -148,7 +148,7 @@ function EspelhoPage() {
   const [masterDuration, setMasterDuration] = useState("00:00");
   // Set de IDs editando — alimentado pelo Centrifugo, visível em todos os browsers
   const { editingItemIds, connected: realtimeConnected } = useEspelhoRealtime({
-    url: import.meta.env.VITE_CENTRIFUGO_URL,
+    url: "wss://centrifugo-production-449f.up.railway.app/connection/websocket",
     onEspelhoAlterado: () => load(),
     onCabecaAtualizada: (payload) => {
       // Mantém o estado local em sincronia mesmo antes do load() geral chegar,
@@ -484,16 +484,21 @@ function EspelhoPage() {
   return (
     <div className="p-4 sm:p-6 space-y-4 h-full flex flex-col overflow-hidden">
       {/* Header Premium */}
-      <div className="flex items-center gap-3 border-b border-[#22c55e]/10 pb-3 shrink-0">
-        <MonitorPlay className="h-5 w-5 text-[#22c55e]" />
-        <h1 className="text-h1 font-bold tracking-tight text-[#22c55e]">
-          ESPELHO
-        </h1>
-        <span className="text-label text-[#6b7280] hidden sm:inline">
-          Exibição · controle de tempo
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          {/* PASSO 6: Adicionado o monitorador silencioso do rascunho de backup na Toolbar */}
+      <div className="border-b border-[#22c55e]/10 pb-4 shrink-0">
+        <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#22c55e] mb-1">
+          {new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" }).toUpperCase()}
+        </p>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center h-10 w-10 rounded-md bg-[#22c55e]/10 border border-[#22c55e]/40 shrink-0">
+            <MonitorPlay className="h-5 w-5 text-[#22c55e]" />
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-black tracking-tight font-mono uppercase text-white">ESPELHO</h1>
+          <span className="text-[11px] font-mono uppercase tracking-widest text-[#6b7280] hidden sm:inline">
+            Exibição · Controle de Tempo
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            {/* PASSO 6: Adicionado o monitorador silencioso do rascunho de backup na Toolbar */}
+          </div>
         </div>
       </div>
 
