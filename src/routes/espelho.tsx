@@ -163,6 +163,15 @@ function EspelhoPage() {
     },
     onProducaoAlterada: (payload) => setPlannedEditorialDuration(payload.valor),
     onMasterAlterado: (payload) => setMasterDuration(payload.valor),
+    onItemStatusAlterado: (payload) => {
+      // Atualiza o status do item instantaneamente ao receber o evento do TP/Centrifugo,
+      // sem depender do polling de fallback (15s) para refletir "no ar" / "exibido".
+      setItens((prev) =>
+        prev.map((it) =>
+          it.id === payload.itemId ? { ...it, status: payload.status as ItemStatus } : it
+        )
+      );
+    },
   });
 
   const broadcastEditing = useCallback((itemId: string, editando: boolean) => {

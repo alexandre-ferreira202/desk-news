@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { updateItem as updateItemStatusFn } from "@/functions/espelho.functions";
 import { toast } from "sonner";
 import { 
   MonitorPlay, 
@@ -609,8 +610,11 @@ function TeleprompterPage() {
   }, [selectedItemId, calculateTotalProgress]);
 
   const updateItemStatus = async (itemId: string, newStatus: string) => {
-    const { error } = await supabase.from("espelho_itens").update({ status: newStatus }).eq("id", itemId);
-    if (error) console.error("Erro ao atualizar status:", error.message);
+    try {
+      await updateItemStatusFn({ data: { id: itemId, patch: { status: newStatus } } });
+    } catch (err) {
+      console.error("Erro ao atualizar status:", err);
+    }
   };
 
   // Gerenciar Status Automático
