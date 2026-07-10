@@ -1,4 +1,4 @@
-import { T as TSS_SERVER_FUNCTION } from "./server-BacCHfls.js";
+import { T as TSS_SERVER_FUNCTION } from "./server-CK3J3p26.js";
 var createServerRpc = (serverFnMeta, splitImportFn) => {
   const url = "/_serverFn/" + serverFnMeta.id;
   return Object.assign(splitImportFn, {

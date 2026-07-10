@@ -73,7 +73,7 @@ function getResponse() {
 }
 var HEADERS = { TSS_SHELL: "X-TSS_SHELL" };
 async function getStartManifest(matchedRoutes) {
-  const { tsrStartManifest } = await import("./_tanstack-start-manifest_v-DgBZ_xzR.js");
+  const { tsrStartManifest } = await import("./_tanstack-start-manifest_v-BgOcM83W.js");
   const startManifest = tsrStartManifest();
   let routes = startManifest.routes;
   routes[rootRouteId];
@@ -95,71 +95,71 @@ async function getStartManifest(matchedRoutes) {
 const manifest = {
   "43cce26e2d9c7d7236c79f7189b57e0301d0bfdf4db0018bb7aacebb767ee4ad": {
     functionName: "loadEspelho_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "4c8755d3d99eca613e3e71e4d5b9474154e21982b56b52eedc1770c0fad09431": {
     functionName: "addComercial_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "569d48dd3002cdf42ee23072ec5c032b99dce65d5ab3b7541e5e35250267b272": {
     functionName: "addFromMateria_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "6535f7b9b94bb8e973875c63a5ec85ddceca0579fc9e2286b926d6706e83f4e9": {
     functionName: "addBloco_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "750da42b80265ce82c347f2dd53a36328a71128f315f1e899f628d76f31910b4": {
     functionName: "delItem_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "884a019b0675dc4500b80314145702afebb87b89cb76241817016da28b5c01c2": {
     functionName: "updateItem_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "901abf35ed427a78ae718dbfcd63e1e3a16327ca38bc35011a0bd895f29fb182": {
     functionName: "updateMateriaEItem_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "a16ed97afda1647cb228bc144676893695ecfa5039f79d6d0d6adb86d7254391": {
     functionName: "reorderItens_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "a96ac18cb419a723a0f4800ac8e5cc5974752c47500bbf49b78ca4e27297a018": {
     functionName: "updateBloco_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "ad2fc5518f7239326e3f3a0014c6f45b5ab402d4edc4959403c81d196c966beb": {
     functionName: "loadMaterias_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "b7b6deffab0d610de331893c033da16fb3c7c1a93806f97cbefc567e0e8ca0a4": {
     functionName: "broadcastProducao_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "c5fde7026c8577aec8eccb352826fea710d1f3ec475d04a5873672a718e0dee6": {
     functionName: "updateMateriaCabeca_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "c7b0f794176848649130066b4ca4f5e76b7ec7f2789bcea8c15d21d2fa33f465": {
     functionName: "addItem_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "c8f3229b6fc13b6377288ce4e334b48d97871bff593728663ba6244afcebfa9b": {
     functionName: "broadcastEditando_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "d8ca7de4792b1cb7cb60e38e9707eb843bc68895044e007e4ef3707b9a9a7daa": {
     functionName: "delBloco_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   },
   "dafc0fb272624072473a05a2711d169e092bd7f206b135db7baec57591afd2ae": {
     functionName: "fetchPortais_createServerFn_handler",
-    importer: () => import("./portais.functions-DsGaX8uo.js")
+    importer: () => import("./portais.functions-BgNekRul.js")
   },
   "f45e228d1f674f40ad9099b74933bc7f0b19577f51673eacad4852455b9ed645": {
     functionName: "broadcastMaster_createServerFn_handler",
-    importer: () => import("./espelho.functions-BaqqCQGb.js")
+    importer: () => import("./espelho.functions-UHNF5WAY.js")
   }
 };
 async function getServerFnById(id, access) {
@@ -1400,8 +1400,8 @@ var getBaseManifest = getProdBaseManifest;
 var createEarlyHintsForRequest = createEarlyHintsCollector;
 async function loadEntries() {
   const [routerEntry, startEntry, pluginAdapters] = await Promise.all([
-    import("./router-7rjFqzx6.js"),
-    import("./start-h4HllSpU.js"),
+    import("./router-D-H7-xgs.js"),
+    import("./start-BnAb7Uf7.js"),
     import("./empty-plugin-adapters-BFgPZ6_d.js")
   ]);
   return {

@@ -4,9 +4,9 @@ import { jsxs, Fragment, jsx } from "react/jsx-runtime";
 import * as React from "react";
 import React__default, { useState, useEffect, useCallback, createContext, useContext, useRef, useMemo } from "react";
 import { Toaster, toast } from "sonner";
-import { X, LayoutGrid, FileText, Newspaper, MonitorPlay, ClipboardList, BarChart3, Film, Sun, Moon, LogOut, Menu, Timer, Type, MoveVertical, FlipHorizontal, RotateCcw, Pause, Play, Maximize, HelpCircle, BookOpen, Minimize, Keyboard, Touchpad, Zap, Plus, Calendar as Calendar$1, Loader2, CheckCircle2, Cloud, PenTool, Search, Sparkles, Undo2, Redo2, Trash2, FolderOpen, GripHorizontal, RefreshCw, HardDrive, FileCheck, FileX, VolumeX, Volume2, PowerOff, Youtube, Grid2X2, SkipBack, Square, SkipForward, Sliders, Image, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, CalendarIcon, Megaphone, Archive, Rss, ChevronLeft, ChevronRight, Pencil, ExternalLink, Printer, Users, MapPin, StickyNote, Radio, Route as Route$d, Tv, GripVertical, ShieldAlert } from "lucide-react";
+import { X, LayoutGrid, FileText, Newspaper, MonitorPlay, ClipboardList, BarChart3, Film, Sun, Moon, LogOut, Menu, Timer, Type, MoveVertical, FlipHorizontal, RotateCcw, Pause, Play, Maximize, HelpCircle, BookOpen, Minimize, Keyboard, Touchpad, Zap, Plus, Calendar as Calendar$1, Loader2, CheckCircle2, Cloud, PenTool, Search, Sparkles, Undo2, Redo2, Trash2, FolderOpen, GripHorizontal, RefreshCw, HardDrive, FileCheck, FileX, VolumeX, Volume2, PowerOff, Youtube, Grid2X2, SkipBack, Square, SkipForward, Image, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, CalendarIcon, Megaphone, Archive, Rss, ChevronLeft, ChevronRight, Pencil, ExternalLink, Printer, Users, MapPin, StickyNote, Radio, Route as Route$d, Tv, GripVertical, ShieldAlert } from "lucide-react";
 import { Client, neonConfig } from "@neondatabase/serverless";
-import { T as TSS_SERVER_FUNCTION, g as getServerFnById, c as createServerFn } from "./server-BacCHfls.js";
+import { T as TSS_SERVER_FUNCTION, g as getServerFnById, c as createServerFn } from "./server-CK3J3p26.js";
 import { z } from "zod";
 import { Slot } from "@radix-ui/react-slot";
 import { cva } from "class-variance-authority";
@@ -44,7 +44,7 @@ function useServerFn(serverFn) {
     }
   }, [router, serverFn]);
 }
-const appCss = "/assets/styles-DoT9UyLA.css";
+const appCss = "/assets/styles-DSR2rY4o.css";
 if (typeof process !== "undefined" && process.versions?.node) {
   const { default: ws } = await import("ws");
   neonConfig.webSocketConstructor = ws;
@@ -985,6 +985,9 @@ function ReadingMonitor({
     )
   ] });
 }
+function tpCanalKey(programa) {
+  return `tp-sync-${(programa || "geral").trim().toLowerCase()}`;
+}
 function TeleprompterPage() {
   const searchParams = Route$b.useSearch();
   const [date, setDate] = useState(searchParams.date || "");
@@ -1078,14 +1081,42 @@ function TeleprompterPage() {
   useEffect(() => {
     loadItems();
   }, [date, programa]);
+  const lastAppliedRequestedModeRef = useRef(null);
+  useEffect(() => {
+    const key = tpCanalKey(programa);
+    const interval = setInterval(async () => {
+      try {
+        const { rows } = await db.query(
+          `SELECT state FROM tp_master_state WHERE canal = $1 LIMIT 1`,
+          [key]
+        );
+        const state = rows?.[0]?.state;
+        const requestedMode = state?.requestedMode;
+        if (requestedMode && (requestedMode === "master" || requestedMode === "camera") && requestedMode !== syncMode && lastAppliedRequestedModeRef.current !== requestedMode) {
+          lastAppliedRequestedModeRef.current = requestedMode;
+          setSyncMode(requestedMode);
+        }
+      } catch {
+      }
+    }, 2e3);
+    return () => clearInterval(interval);
+  }, [programa, syncMode]);
   useEffect(() => {
     if (syncMode !== "camera") return;
     setIsConnected(true);
     const interval = setInterval(async () => {
-      const key = `tp-sync-${programa || "geral"}`;
-      const { data, error } = await db.from("tp_master_state").select("*").eq("canal", key).maybeSingle();
-      if (error || !data) return;
-      const payload = data.state;
+      const key = tpCanalKey(programa);
+      let payload;
+      try {
+        const { rows } = await db.query(
+          `SELECT state FROM tp_master_state WHERE canal = $1 LIMIT 1`,
+          [key]
+        );
+        payload = rows?.[0]?.state;
+      } catch {
+        return;
+      }
+      if (!payload) return;
       isRemoteUpdateRef.current = true;
       if (payload.selectedItemId !== void 0 && payload.selectedItemId !== selectedItemId)
         setSelectedItemId(payload.selectedItemId);
@@ -1114,19 +1145,27 @@ function TeleprompterPage() {
     const now = Date.now();
     if (now - lastBroadcastTimeRef.current < 2e3) return;
     lastBroadcastTimeRef.current = now;
-    const key = `tp-sync-${s.programa || "geral"}`;
-    await db.from("tp_master_state").upsert({
-      canal: key,
-      state: {
-        selectedItemId: s.selectedItemId,
-        isScrolling: s.isScrolling,
-        fontSize: s.fontSize,
-        scrollSpeed: s.scrollSpeed,
-        mirrored: s.mirrored,
-        scrollTop: scrollRef.current?.scrollTop || 0
-      },
-      updated_at: (/* @__PURE__ */ new Date()).toISOString()
-    }, { onConflict: "canal" });
+    const key = tpCanalKey(s.programa);
+    const state = {
+      selectedItemId: s.selectedItemId,
+      isScrolling: s.isScrolling,
+      fontSize: s.fontSize,
+      scrollSpeed: s.scrollSpeed,
+      mirrored: s.mirrored,
+      scrollTop: scrollRef.current?.scrollTop || 0
+    };
+    try {
+      await db.query(
+        `INSERT INTO tp_master_state (canal, state, updated_at)
+         VALUES ($1, $2::jsonb, now())
+         ON CONFLICT (canal) DO UPDATE
+           SET state = $2::jsonb,
+               updated_at = now()`,
+        [key, JSON.stringify(state)]
+      );
+    } catch (err) {
+      console.error("[TP] Erro ao publicar estado do master:", err);
+    }
   }, []);
   useEffect(() => {
     lastBroadcastTimeRef.current = 0;
@@ -1211,14 +1250,12 @@ function TeleprompterPage() {
         if (rodaTvRect.top <= centerLine) {
           if (currentItem2 && rodaTvFiredRef.current !== currentItem2.id) {
             rodaTvFiredRef.current = currentItem2.id;
-            db.from("tp_playout_events").insert({
-              event: "RODA_VT",
-              materia_id: currentItem2.materia_id ?? null,
-              assunto: currentItem2.assunto,
-              item_id: currentItem2.id,
-              created_at: (/* @__PURE__ */ new Date()).toISOString()
-            }).then(({ error }) => {
-              if (error) console.error("Erro ao enviar RODA_VT:", error.message);
+            db.query(
+              `INSERT INTO tp_playout_events (event, materia_id, assunto, item_id, created_at)
+               VALUES ($1, $2, $3, $4, now())`,
+              ["RODA_VT", currentItem2.materia_id ?? null, currentItem2.assunto, currentItem2.id]
+            ).catch((error) => {
+              console.error("Erro ao enviar RODA_VT:", error?.message ?? error);
             });
           }
           shouldStopScrolling = true;
@@ -1385,6 +1422,10 @@ function TeleprompterPage() {
           "px-2 py-1 rounded text-[11px] font-bold border",
           syncMode === "master" ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-blue-500/10 border-blue-500/30 text-blue-400"
         ), children: syncMode === "master" ? "🎙️ MASTER" : "🎥 CÂMERA" }),
+        /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-600 px-1", title: "Precisa ser idêntico ao 'canal' mostrado no painel Teleprompter do playout", children: [
+          "canal: ",
+          tpCanalKey(programa)
+        ] }),
         syncMode === "camera" && /* @__PURE__ */ jsx("div", { className: cn(
           "px-2 py-1 rounded text-[11px] font-bold border",
           isConnected ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-red-500/10 border-red-500/30 text-red-400"
@@ -3310,11 +3351,14 @@ ${estrutura}`;
               (() => {
                 const ativo = revisarCreditos.find((c) => revisarCurrentTime >= c.timecode && revisarCurrentTime < c.timecode + c.duracao);
                 if (!ativo) return null;
+                const partes = ativo.valor.split(/\/+/).map((p) => p.trim());
+                const linha1 = partes[0] || ativo.valor;
+                const linha2 = partes[1] || ativo.tipo.replace("_", " ");
                 return /* @__PURE__ */ jsx("div", { className: "absolute bottom-3 left-3 right-3 pointer-events-none", children: /* @__PURE__ */ jsxs("div", { className: "flex items-stretch overflow-hidden rounded-sm shadow-xl max-w-xs", children: [
                   /* @__PURE__ */ jsx("div", { className: "w-1 shrink-0", style: { backgroundColor: ativo.cor } }),
                   /* @__PURE__ */ jsxs("div", { className: "px-3 py-1.5 flex-1", style: { backgroundColor: "rgba(0,0,0,0.92)" }, children: [
-                    /* @__PURE__ */ jsx("div", { className: "text-white font-bold text-xs uppercase tracking-wide", children: ativo.valor }),
-                    /* @__PURE__ */ jsx("div", { className: "text-[10px] uppercase tracking-widest", style: { color: ativo.cor }, children: ativo.tipo.replace("_", " ") })
+                    /* @__PURE__ */ jsx("div", { className: "text-white font-bold text-xs uppercase tracking-wide", children: linha1 }),
+                    /* @__PURE__ */ jsx("div", { className: "text-[10px] uppercase tracking-widest", style: { color: ativo.cor }, children: linha2 })
                   ] })
                 ] }) });
               })()
@@ -4197,23 +4241,24 @@ function ConfigTarjaModal({
   ] }) });
 }
 function GcPanel({
-  // Opcional: receber callbacks externos
+  // Controlled state from playout.tsx
+  gcLine1,
+  setGcLine1,
+  gcLine2,
+  setGcLine2,
+  gcDuration,
+  setGcDuration,
+  gcVisible,
+  setGcVisible,
+  gcCreditsQueue,
+  // Callbacks
   onTake,
   onClear,
-  // Props controlled: quando definidas, o painel reflete os valores externos
-  externalLine1,
-  externalLine2
+  onSkip,
+  // Notifica o playout sempre que o PNG/posição/fonte da tarja mudar,
+  // para que ele possa repassar isso pro output real (WebSocket).
+  onLayerChange
 }) {
-  const [gcLine1, setGcLine1] = useState(externalLine1 || "");
-  const [gcLine2, setGcLine2] = useState(externalLine2 || "");
-  const [gcDuration, setGcDuration] = useState(0);
-  const [gcVisible, setGcVisible] = useState(false);
-  useEffect(() => {
-    if (externalLine1 !== void 0) setGcLine1(externalLine1);
-  }, [externalLine1]);
-  useEffect(() => {
-    if (externalLine2 !== void 0) setGcLine2(externalLine2);
-  }, [externalLine2]);
   const [layerOpen, setLayerOpen] = useState(false);
   const [tarjaCustomPng, setTarjaCustomPng] = useState(null);
   const [tarjaScaleX, setTarjaScaleX] = useState(80);
@@ -4228,21 +4273,12 @@ function GcPanel({
   const [font2X, setFont2X] = useState(8);
   const [font2Y, setFont2Y] = useState(70);
   useEffect(() => {
-    if (!gcVisible || gcDuration === 0) return;
-    const timer = setTimeout(() => setGcVisible(false), gcDuration * 1e3);
-    return () => clearTimeout(timer);
-  }, [gcVisible, gcDuration]);
-  const handleTake = useCallback(() => {
-    if (!gcLine1 && !gcLine2) return;
-    setGcVisible(true);
-    onTake?.({
-      line1: gcLine1,
-      line2: gcLine2,
-      tarjaPng: tarjaCustomPng || null,
-      tarjaX,
-      tarjaY,
+    onLayerChange?.({
+      tarjaCustomPng,
       tarjaScaleX,
       tarjaScaleY,
+      tarjaX,
+      tarjaY,
       font1Size,
       font1X,
       font1Y,
@@ -4250,29 +4286,41 @@ function GcPanel({
       font2X,
       font2Y
     });
-  }, [gcLine1, gcLine2, tarjaCustomPng, tarjaX, tarjaY, tarjaScaleX, tarjaScaleY, font1Size, font1X, font1Y, font2Size, font2X, font2Y, onTake]);
+  }, [
+    tarjaCustomPng,
+    tarjaScaleX,
+    tarjaScaleY,
+    tarjaX,
+    tarjaY,
+    font1Size,
+    font1X,
+    font1Y,
+    font2Size,
+    font2X,
+    font2Y
+  ]);
+  const handleTake = useCallback(() => {
+    onTake?.();
+  }, [onTake]);
   const handleClear = useCallback(() => {
-    setGcVisible(false);
     onClear?.();
   }, [onClear]);
   const handleSkip = useCallback(() => {
-    setGcLine1("");
-    setGcLine2("");
-    setGcVisible(false);
-  }, []);
+    onSkip?.();
+  }, [onSkip]);
   const panelStyle = {
     background: "#18181b",
     border: "1px solid #27272a",
-    borderRadius: 24,
-    padding: 24,
+    borderRadius: 16,
+    padding: 16,
     display: "flex",
     flexDirection: "column",
-    gap: 20,
-    boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+    gap: 14,
     fontFamily: "'Inter', 'Segoe UI', sans-serif",
-    minWidth: 320,
-    maxWidth: 420,
-    position: "relative"
+    width: "100%",
+    minWidth: 0,
+    position: "relative",
+    boxSizing: "border-box"
   };
   const inputStyle = {
     width: "100%",
@@ -4411,43 +4459,49 @@ function GcPanel({
           justifyContent: "center"
         }, children: [
           /* @__PURE__ */ jsx("span", { style: { position: "absolute", fontSize: 7, color: "#3f3f46", textTransform: "uppercase", letterSpacing: "0.1em", top: 4, left: 0, right: 0, textAlign: "center" }, children: "GC LIVE PREV" }),
-          gcLine1 || gcLine2 ? /* @__PURE__ */ jsx("div", { style: {
-            position: "absolute",
-            bottom: 4,
-            left: 4,
-            right: 4
-          }, children: tarjaCustomPng ? /* @__PURE__ */ jsxs("div", { style: { position: "relative", lineHeight: 0 }, children: [
-            /* @__PURE__ */ jsx("img", { src: tarjaCustomPng, alt: "tarja", style: { width: "100%", borderRadius: 2 } }),
-            gcLine1 && /* @__PURE__ */ jsx("div", { style: {
-              position: "absolute",
-              left: `${font1X}%`,
-              top: `${font1Y}%`,
-              fontSize: Math.max(4, font1Size * 0.35),
-              fontWeight: 900,
-              color: "#fff",
-              whiteSpace: "nowrap",
-              transform: "translateY(-50%)",
-              fontFamily: "sans-serif",
-              textShadow: "0 1px 3px rgba(0,0,0,0.9)"
-            }, children: gcLine1 }),
-            gcLine2 && /* @__PURE__ */ jsx("div", { style: {
-              position: "absolute",
-              left: `${font2X}%`,
-              top: `${font2Y}%`,
-              fontSize: Math.max(3, font2Size * 0.35),
-              color: "#d4d4d8",
-              whiteSpace: "nowrap",
-              transform: "translateY(-50%)",
-              fontFamily: "sans-serif",
-              textShadow: "0 1px 3px rgba(0,0,0,0.9)"
-            }, children: gcLine2 })
-          ] }) : /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "stretch", borderRadius: 2, overflow: "hidden" }, children: [
-            /* @__PURE__ */ jsx("div", { style: { width: 2, background: "#dc2626", flexShrink: 0 } }),
-            /* @__PURE__ */ jsxs("div", { style: { background: "rgba(0,0,0,0.88)", padding: "3px 5px", flex: 1, minWidth: 0 }, children: [
-              gcLine1 && /* @__PURE__ */ jsx("div", { style: { color: "#fff", fontWeight: 900, fontSize: 7, textTransform: "uppercase", overflow: "hidden", whiteSpace: "nowrap", lineHeight: 1.3 }, children: gcLine1 }),
+          gcLine1 || gcLine2 ? /* @__PURE__ */ jsx("div", { style: { position: "absolute", bottom: 4, left: 4, right: 4 }, children: tarjaCustomPng ? (
+            /* ── Tarja PNG personalizada com texto sobreposto ── */
+            /* @__PURE__ */ jsxs("div", { style: { position: "relative", lineHeight: 0 }, children: [
+              /* @__PURE__ */ jsx(
+                "img",
+                {
+                  src: tarjaCustomPng,
+                  alt: "tarja",
+                  style: { width: "100%", borderRadius: 2, display: "block" }
+                }
+              ),
+              gcLine1 && /* @__PURE__ */ jsx("div", { style: {
+                position: "absolute",
+                left: `${font1X}%`,
+                top: `${font1Y}%`,
+                fontSize: Math.max(4, font1Size * 0.32),
+                fontWeight: 900,
+                color: "#fff",
+                whiteSpace: "nowrap",
+                transform: "translateY(-50%)",
+                fontFamily: "sans-serif",
+                textShadow: "0 1px 3px rgba(0,0,0,0.9)",
+                letterSpacing: "0.03em"
+              }, children: gcLine1 }),
+              gcLine2 && /* @__PURE__ */ jsx("div", { style: {
+                position: "absolute",
+                left: `${font2X}%`,
+                top: `${font2Y}%`,
+                fontSize: Math.max(3, font2Size * 0.32),
+                color: "#d4d4d8",
+                whiteSpace: "nowrap",
+                transform: "translateY(-50%)",
+                fontFamily: "sans-serif",
+                textShadow: "0 1px 3px rgba(0,0,0,0.9)"
+              }, children: gcLine2 })
+            ] })
+          ) : (
+            /* ── Sem PNG: exibe somente o texto com fundo escuro ── */
+            /* @__PURE__ */ jsxs("div", { style: { background: "rgba(0,0,0,0.82)", borderRadius: 3, padding: "4px 6px", borderLeft: "2px solid #dc2626" }, children: [
+              gcLine1 && /* @__PURE__ */ jsx("div", { style: { color: "#fff", fontWeight: 900, fontSize: 7, textTransform: "uppercase", overflow: "hidden", whiteSpace: "nowrap", lineHeight: 1.4 }, children: gcLine1 }),
               gcLine2 && /* @__PURE__ */ jsx("div", { style: { color: "#a1a1aa", fontSize: 6, textTransform: "uppercase", overflow: "hidden", whiteSpace: "nowrap", lineHeight: 1.3 }, children: gcLine2 })
             ] })
-          ] }) }) : null
+          ) }) : null
         ] })
       ] }),
       /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: 8 }, children: [
@@ -5102,6 +5156,8 @@ function PlayoutPage() {
   const [globalItemIndex, setGlobalItemIndex] = useState({});
   const [fileStatus, setFileStatus] = useState({});
   const [isVerifying, setIsVerifying] = useState(false);
+  const [tpSelectedId, setTpSelectedId] = useState(null);
+  const [tpConnected, setTpConnected] = useState(false);
   const [dirHandle, setDirHandle] = useState(null);
   const [isDirReady, setIsDirReady] = useState(false);
   const [localFiles, setLocalFiles] = useState([]);
@@ -5133,6 +5189,10 @@ function PlayoutPage() {
   const [gcLine1, setGcLine1] = useState("");
   const [gcLine2, setGcLine2] = useState("");
   const [gcCreditsQueue, setGcCreditsQueue] = useState([]);
+  const [gcLayerConfig, setGcLayerConfig] = useState(null);
+  const handleGcLayerChange = useCallback((config) => {
+    setGcLayerConfig(config);
+  }, []);
   const [gcDuration, setGcDuration] = useState(0);
   const [gcHistory, setGcHistory] = useState([]);
   const [gcPresets, setGcPresets] = useState({
@@ -5140,7 +5200,6 @@ function PlayoutPage() {
     "Âncora": { line1: "", line2: "Âncora" },
     "Especialista": { line1: "", line2: "Especialista" }
   });
-  const [gcPanelOpen, setGcPanelOpen] = useState(false);
   const { extractCredits } = useAutoCredits({
     apiKey: "gsk_RecCHZh5dHY6zNJLlTAWGyt3FYekwzlSYmsXzYIl8ZtKM0d9Zf7",
     autoPopulate: true,
@@ -5231,6 +5290,17 @@ function PlayoutPage() {
   const [generalJournalTime, setGeneralJournalTime] = useState(0);
   const [doubleClickCount, setDoubleClickCount] = useState(0);
   const [transValue, setTransValue] = useState(0);
+  const [transitionType, setTransitionType] = useState("cut");
+  const [wipeDirIdx, setWipeDirIdx] = useState(0);
+  const [autoTransDur, setAutoTransDur] = useState(30);
+  const [autoTransRunning, setAutoTransRunning] = useState(false);
+  const autoTransRef = useRef(null);
+  const [dskActive, setDskActive] = useState(false);
+  const [dskOpacity, setDskOpacity] = useState(100);
+  const [dskPng, setDskPng] = useState(null);
+  const dskFileInputRef = useRef(null);
+  const [pgmBus, setPgmBus] = useState("black");
+  const [pvwBus, setPvwBus] = useState("cam1");
   const [playerAOpacity, setPlayerAOpacity] = useState(1);
   const [playerBOpacity, setPlayerBOpacity] = useState(0);
   const [playerAZ, setPlayerAZ] = useState(10);
@@ -5240,6 +5310,10 @@ function PlayoutPage() {
   const handleItemFinished = useCallback(() => {
     setIsPlaying(false);
     setPgmProgress(100);
+    setTarjaVisible(false);
+    if (pgmChannelRef.current?.readyState === 1) pgmChannelRef.current.send(JSON.stringify({ type: "tarja_hide" }));
+    setGcVisible(false);
+    if (pgmChannelRef.current?.readyState === 1) pgmChannelRef.current.send(JSON.stringify({ type: "gc_hide" }));
     setTimeout(() => {
       setItems((prev) => {
         const finishedIndex = currentIndex - 1;
@@ -5822,6 +5896,60 @@ function PlayoutPage() {
       }
     }
   }, [items, currentItemId, currentIndex]);
+  const tpCanal = `tp-sync-${(programa || "geral").trim().toLowerCase()}`;
+  const [tpSyncingNow, setTpSyncingNow] = useState(false);
+  const pollTp = useCallback(async (opts) => {
+    try {
+      const { rows } = await db.query(
+        `SELECT state, updated_at FROM tp_master_state WHERE canal = $1 LIMIT 1`,
+        [tpCanal]
+      );
+      const row = rows?.[0];
+      const state = row?.state;
+      if (state?.selectedItemId) {
+        setTpSelectedId(state.selectedItemId);
+        setTpConnected(true);
+        if (opts?.verbose) toast.success("Sincronizado! Item recebido do teleprompter.");
+      } else if (opts?.verbose) {
+        if (!row) {
+          toast.warning(`Nenhum registro encontrado para o canal "${tpCanal}". Confirme se o tp.tsx está aberto com o mesmo programa/data.`);
+        } else {
+          toast.warning("Registro encontrado, mas sem item selecionado no teleprompter ainda.");
+        }
+      }
+    } catch (err) {
+      setTpConnected(false);
+      if (opts?.verbose) toast.error("Erro ao consultar o teleprompter: " + err.message);
+    }
+  }, [tpCanal]);
+  useEffect(() => {
+    pollTp();
+    const interval = setInterval(pollTp, 2e3);
+    return () => clearInterval(interval);
+  }, [pollTp]);
+  const handleForceTpMaster = useCallback(async () => {
+    try {
+      await db.query(
+        `INSERT INTO tp_master_state (canal, state, updated_at)
+         VALUES ($1, jsonb_build_object('requestedMode', 'master'), now())
+         ON CONFLICT (canal) DO UPDATE
+           SET state = tp_master_state.state || jsonb_build_object('requestedMode', 'master'),
+               updated_at = now()`,
+        [tpCanal]
+      );
+      toast.success("Comando enviado: a tela do teleprompter deve virar MASTER em instantes.");
+    } catch {
+      toast.error("Não foi possível enviar o comando ao teleprompter.");
+    }
+  }, [tpCanal]);
+  const handleManualTpSync = useCallback(async () => {
+    setTpSyncingNow(true);
+    await pollTp({ verbose: true });
+    setTimeout(() => setTpSyncingNow(false), 400);
+  }, [pollTp]);
+  const tpCurrentIndex = items.findIndex((i) => i.id === tpSelectedId);
+  const tpCurrentItem = tpCurrentIndex >= 0 ? items[tpCurrentIndex] : null;
+  const tpNextItem = tpCurrentIndex >= 0 ? items.slice(tpCurrentIndex + 1).find((i) => !!i.cabeca) ?? items[tpCurrentIndex + 1] ?? null : null;
   useEffect(() => {
     const interval = setInterval(() => {
       load();
@@ -5945,240 +6073,286 @@ function PlayoutPage() {
   useEffect(() => {
     sendPgmCamCommandRef.current = sendPgmCamCommand;
   }, [sendPgmCamCommand]);
-  useEffect(() => {
-    const ch = new BroadcastChannel("desknews_playout_sync");
-    ch.onmessage = async (event) => {
-      if (event.data?.type !== "RODA_VT") return;
-      const { materiaId, assunto, itemId } = event.data?.payload ?? {};
-      console.log("[Playout] RODA_VT recebido →", { materiaId, assunto, itemId });
-      const currentItems = itemsRef.current;
-      const targetItem = currentItems.find(
-        (i) => i.id === itemId || materiaId && i.materia_id === materiaId || i.assunto === assunto
-      );
-      if (targetItem) {
-        const idx = currentItems.findIndex((i) => i.id === targetItem.id);
-        if (idx !== -1) {
-          setCurrentIndex(idx);
-          setCurrentItemId(targetItem.id);
-        }
+  const processRodaVt = useCallback(async (payload) => {
+    const { materiaId, assunto, itemId } = payload ?? {};
+    console.log("[Playout] RODA_VT recebido →", { materiaId, assunto, itemId });
+    const currentItems = itemsRef.current;
+    const targetItem = currentItems.find(
+      (i) => i.id === itemId || materiaId && i.materia_id === materiaId || i.assunto === assunto
+    );
+    if (targetItem) {
+      const idx = currentItems.findIndex((i) => i.id === targetItem.id);
+      if (idx !== -1) {
+        setCurrentIndex(idx);
+        setCurrentItemId(targetItem.id);
       }
-      const currentLocalFiles = localFilesRef.current;
-      const currentActivePlayer = activePlayerRef.current;
-      const currentPgmCamUrl = pgmCamUrlRef.current;
-      const expectedFileName = getFileNameRef.current(assunto);
-      const file = currentLocalFiles.find((f) => f.name === expectedFileName);
-      const url = file?.blobUrl ?? await getFileUrlRef.current(assunto);
-      if (url && file) {
-        if (pvwRef.current) {
-          pvwRef.current.src = url;
-          pvwRef.current.load();
-        }
-        setSelectedFile(file);
-        preloadInactivePlayerRef.current(file.blobUrl, currentActivePlayer);
-        if (currentPgmCamUrl) sendPgmCamCommandRef.current("stopVideo");
-        const aEl = pgmARef.current;
-        const bEl = pgmBRef.current;
-        if (bEl) {
-          bEl.pause();
-          bEl.src = "";
-        }
-        if (aEl) {
-          aEl.pause();
-          aEl.oncanplay = null;
-          const rodaVtAC = new AbortController();
-          const startPlay = () => {
-            aEl.play().then(() => {
-              setPgmCamUrl(null);
-              setPgmCamIsYoutube(false);
-              setPgmCamMuted(false);
-              setPgmCamVolume(100);
-              setPgmFile(file);
-              setIsPlaying(true);
-              setPlayerAOpacity(1);
-              setPlayerAZ(10);
-              setPlayerBOpacity(0);
-              setPlayerBZ(0);
-              setActivePlayer("A");
-              setPgmProgress(0);
-              setPgmCurrentTime(0);
-            }).catch(() => {
-            });
-          };
-          const isSameSrc = aEl.src === file.blobUrl;
-          if (isSameSrc && aEl.readyState >= 3) {
-            aEl.currentTime = 0;
+    }
+    const currentLocalFiles = localFilesRef.current;
+    const currentActivePlayer = activePlayerRef.current;
+    const currentPgmCamUrl = pgmCamUrlRef.current;
+    const expectedFileName = getFileNameRef.current(assunto);
+    const file = currentLocalFiles.find((f) => f.name === expectedFileName);
+    const url = file?.blobUrl ?? await getFileUrlRef.current(assunto);
+    if (url && file) {
+      if (pvwRef.current) {
+        pvwRef.current.src = url;
+        pvwRef.current.load();
+      }
+      setSelectedFile(file);
+      preloadInactivePlayerRef.current(file.blobUrl, currentActivePlayer);
+      if (currentPgmCamUrl) sendPgmCamCommandRef.current("stopVideo");
+      const aEl = pgmARef.current;
+      const bEl = pgmBRef.current;
+      if (bEl) {
+        bEl.pause();
+        bEl.src = "";
+      }
+      if (aEl) {
+        aEl.pause();
+        aEl.oncanplay = null;
+        const rodaVtAC = new AbortController();
+        const startPlay = () => {
+          aEl.play().then(() => {
+            setPgmCamUrl(null);
+            setPgmCamIsYoutube(false);
+            setPgmCamMuted(false);
+            setPgmCamVolume(100);
+            setPgmFile(file);
+            setIsPlaying(true);
+            setPlayerAOpacity(1);
+            setPlayerAZ(10);
+            setPlayerBOpacity(0);
+            setPlayerBZ(0);
+            setActivePlayer("A");
+            setPgmProgress(0);
+            setPgmCurrentTime(0);
+          }).catch(() => {
+          });
+        };
+        const isSameSrc = aEl.src === file.blobUrl;
+        if (isSameSrc && aEl.readyState >= 3) {
+          aEl.currentTime = 0;
+          startPlay();
+        } else {
+          aEl.addEventListener("canplay", () => {
+            rodaVtAC.abort();
             startPlay();
-          } else {
-            aEl.addEventListener("canplay", () => {
-              rodaVtAC.abort();
-              startPlay();
-            }, { once: true, signal: rodaVtAC.signal });
-            aEl.src = file.blobUrl;
-            aEl.load();
-          }
+          }, { once: true, signal: rodaVtAC.signal });
+          aEl.src = file.blobUrl;
+          aEl.load();
         }
-        if (pgmChannelRef.current?.readyState === 1)
-          pgmChannelRef.current.send(JSON.stringify({ type: "pgm_take", fileName: file.name }));
-        toast.success(`▶ AUTO-PLAY: "${assunto}"`, { duration: 3e3 });
-      } else {
-        console.warn("[Playout] RODA_VT: arquivo não encontrado →", assunto);
-        toast.warning(`⚠ VT não encontrado na pasta: "${assunto}"`, { duration: 4e3 });
       }
-      if (materiaId) {
-        try {
-          const [{ rows }, { rows: itemRows }] = await Promise.all([
-            db.query(
-              `SELECT id, titulo, editor_texto, editor_imagem, credito_reporter, estrutura, timeline_json, duracao_vt
+      if (pgmChannelRef.current?.readyState === 1)
+        pgmChannelRef.current.send(JSON.stringify({ type: "pgm_take", fileName: file.name }));
+      toast.success(`▶ AUTO-PLAY: "${assunto}"`, { duration: 3e3 });
+    } else {
+      console.warn("[Playout] RODA_VT: arquivo não encontrado →", assunto);
+      toast.warning(`⚠ VT não encontrado na pasta: "${assunto}"`, { duration: 4e3 });
+    }
+    if (materiaId) {
+      try {
+        const [{ rows }, { rows: itemRows }] = await Promise.all([
+          db.query(
+            `SELECT id, titulo, editor_texto, editor_imagem, credito_reporter, estrutura, timeline_json, duracao_vt
                  FROM materias WHERE id = $1`,
-              [materiaId]
-            ),
-            itemId ? db.query(`SELECT tempo FROM espelho_itens WHERE id = $1`, [itemId]) : Promise.resolve({ rows: [] })
-          ]);
-          const data = rows?.[0];
-          if (data) {
-            const { sonoras, passagens, producao, itensLauda: itensEstrutura } = parsarSonorasEPassagens(data.estrutura);
-            setGcLine1("");
-            setGcLine2("");
-            setGcCreditsQueue([]);
-            setGcVisible(false);
-            setRemovedLaudaOrdens((prev) => {
-              const n = { ...prev };
-              delete n[data.id];
-              return n;
+            [materiaId]
+          ),
+          itemId ? db.query(`SELECT tempo FROM espelho_itens WHERE id = $1`, [itemId]) : Promise.resolve({ rows: [] })
+        ]);
+        const data = rows?.[0];
+        if (data) {
+          const { sonoras, passagens, producao, itensLauda: itensEstrutura } = parsarSonorasEPassagens(data.estrutura);
+          setGcLine1("");
+          setGcLine2("");
+          setGcCreditsQueue([]);
+          setGcVisible(false);
+          setTarjaVisible(false);
+          if (pgmChannelRef.current?.readyState === 1) pgmChannelRef.current.send(JSON.stringify({ type: "tarja_hide" }));
+          setRemovedLaudaOrdens((prev) => {
+            const n = { ...prev };
+            delete n[data.id];
+            return n;
+          });
+          let creditsList = [];
+          let itensLauda = itensEstrutura;
+          let timelineJsonParsed = null;
+          if (data.timeline_json) {
+            try {
+              timelineJsonParsed = JSON.parse(data.timeline_json);
+            } catch {
+              timelineJsonParsed = null;
+            }
+          }
+          if (timelineJsonParsed && timelineJsonParsed.length > 0) {
+            timelineJsonRef.current = timelineJsonParsed;
+            itensLauda = timelineJsonParsed.map((c, idx) => ({
+              tipo: c.tipo,
+              nome: c.tipo,
+              valor: c.valor,
+              ordem: idx
+            }));
+            creditsList = timelineJsonParsed.map((c) => ({
+              line1: c.valor,
+              line2: c.tipo.replace("ED_TEXTO", "ED. TEXTO").replace("ED_IMAGEM", "ED. IMAGEM")
+            }));
+            console.log("[Playout] RODA_VT: usando timeline_json da Redação →", creditsList.length, "créditos");
+          } else {
+            if (data.editor_texto) creditsList.push({ line1: data.editor_texto, line2: "ED. TEXTO" });
+            if (data.editor_imagem) creditsList.push({ line1: data.editor_imagem, line2: "ED. IMAGEM" });
+            if (data.credito_reporter) creditsList.push({ line1: data.credito_reporter, line2: "REPÓRTER" });
+            let laudaOrdem = itensLauda.length;
+            if (data.editor_texto && !itensLauda.some((it) => it.tipo === "ED_TEXTO"))
+              itensLauda.push({ tipo: "ED_TEXTO", nome: "ED_TEXTO", valor: data.editor_texto, ordem: laudaOrdem++ });
+            if (data.editor_imagem && !itensLauda.some((it) => it.tipo === "ED_IMAGEM"))
+              itensLauda.push({ tipo: "ED_IMAGEM", nome: "ED_IMAGEM", valor: data.editor_imagem, ordem: laudaOrdem++ });
+            if (data.credito_reporter && !itensLauda.some((it) => it.tipo === "REPÓRTER"))
+              itensLauda.push({ tipo: "REPÓRTER", nome: "REPÓRTER", valor: data.credito_reporter, ordem: laudaOrdem++ });
+            console.log("[Playout] RODA_VT: timeline_json ausente, usando campos da matéria →", creditsList.length, "créditos");
+          }
+          setGcCreditsQueue(creditsList);
+          if (creditsList.length > 0) {
+            setGcLine1(creditsList[0].line1);
+            setGcLine2(creditsList[0].line2);
+          }
+          setMateriaAtual({
+            materia_id: data.id,
+            titulo: data.titulo,
+            editor_texto: data.editor_texto,
+            editor_imagem: data.editor_imagem,
+            credito_reporter: data.credito_reporter,
+            sonoras,
+            passagens,
+            producao,
+            itensLauda,
+            _estrutura: data.estrutura
+          });
+          console.log("[Playout] RODA_VT: lauda carregada →", data.titulo);
+          if (timelineJsonParsed && timelineJsonParsed.length > 0) {
+            const map = /* @__PURE__ */ new Map();
+            const tl = [];
+            timelineJsonParsed.forEach((c) => {
+              const key = `${c.valor}|${c.tipo.replace("ED_TEXTO", "ED. TEXTO").replace("ED_IMAGEM", "ED. IMAGEM")}`;
+              map.set(key, { inicio: c.timecode, duracao: c.duracao ?? 5 });
+              tl.push({ nome: c.valor, funcao: c.tipo.replace("ED_TEXTO", "ED. TEXTO").replace("ED_IMAGEM", "ED. IMAGEM"), timecodeInicio: c.timecode, duracao: c.duracao ?? 5 });
             });
-            let creditsList = [];
-            let itensLauda = itensEstrutura;
-            let timelineJsonParsed = null;
-            if (data.timeline_json) {
-              try {
-                timelineJsonParsed = JSON.parse(data.timeline_json);
-              } catch {
-                timelineJsonParsed = null;
-              }
+            laudaSnapshotRef.current = itensLauda;
+            sonorasSnapshotRef.current = sonoras;
+            estruturaSnapshotRef.current = data.estrutura;
+            sonorasMapRef.current = map;
+            sonorasDisparadosRef.current.clear();
+            setSonorasTimeline(tl);
+            console.log(`[Playout] RODA_VT: ${tl.length} timecode(s) do timeline_json aplicados diretamente`);
+          } else if (data.estrutura && itensLauda.length > 0) {
+            const tempoEspelho = itemRows?.[0]?.tempo;
+            let duracaoPrevia = 90;
+            if (tempoEspelho) {
+              const partes = tempoEspelho.split(":").map(Number);
+              if (partes.length === 2) duracaoPrevia = partes[0] * 60 + partes[1];
+              else if (partes.length === 1) duracaoPrevia = partes[0];
             }
-            if (timelineJsonParsed && timelineJsonParsed.length > 0) {
-              timelineJsonRef.current = timelineJsonParsed;
-              itensLauda = timelineJsonParsed.map((c, idx) => ({
-                tipo: c.tipo,
-                nome: c.tipo,
-                valor: c.valor,
-                ordem: idx
-              }));
-              creditsList = timelineJsonParsed.map((c) => ({
-                line1: c.valor,
-                line2: c.tipo.replace("ED_TEXTO", "ED. TEXTO").replace("ED_IMAGEM", "ED. IMAGEM")
-              }));
-              console.log("[Playout] RODA_VT: usando timeline_json da Redação →", creditsList.length, "créditos");
-            } else {
-              if (data.editor_texto) creditsList.push({ line1: data.editor_texto, line2: "ED. TEXTO" });
-              if (data.editor_imagem) creditsList.push({ line1: data.editor_imagem, line2: "ED. IMAGEM" });
-              if (data.credito_reporter) creditsList.push({ line1: data.credito_reporter, line2: "REPÓRTER" });
-              let laudaOrdem = itensLauda.length;
-              if (data.editor_texto && !itensLauda.some((it) => it.tipo === "ED_TEXTO"))
-                itensLauda.push({ tipo: "ED_TEXTO", nome: "ED_TEXTO", valor: data.editor_texto, ordem: laudaOrdem++ });
-              if (data.editor_imagem && !itensLauda.some((it) => it.tipo === "ED_IMAGEM"))
-                itensLauda.push({ tipo: "ED_IMAGEM", nome: "ED_IMAGEM", valor: data.editor_imagem, ordem: laudaOrdem++ });
-              if (data.credito_reporter && !itensLauda.some((it) => it.tipo === "REPÓRTER"))
-                itensLauda.push({ tipo: "REPÓRTER", nome: "REPÓRTER", valor: data.credito_reporter, ordem: laudaOrdem++ });
-              console.log("[Playout] RODA_VT: timeline_json ausente, usando campos da matéria →", creditsList.length, "créditos");
-            }
-            setGcCreditsQueue(creditsList);
-            if (creditsList.length > 0) {
-              setGcLine1(creditsList[0].line1);
-              setGcLine2(creditsList[0].line2);
-            }
-            setMateriaAtual({
-              materia_id: data.id,
-              titulo: data.titulo,
-              editor_texto: data.editor_texto,
-              editor_imagem: data.editor_imagem,
-              credito_reporter: data.credito_reporter,
-              sonoras,
-              passagens,
-              producao,
-              itensLauda,
-              _estrutura: data.estrutura
-            });
-            console.log("[Playout] RODA_VT: lauda carregada →", data.titulo);
-            if (timelineJsonParsed && timelineJsonParsed.length > 0) {
+            console.log(`[Playout] RODA_VT: calculando timecodes via IA (duração prevista: ${duracaoPrevia}s)`);
+            laudaSnapshotRef.current = itensLauda;
+            sonorasSnapshotRef.current = sonoras;
+            estruturaSnapshotRef.current = data.estrutura;
+            const timelineFallback = construirTimelineFallback(itensLauda, duracaoPrevia, sonoras);
+            if (timelineFallback.length > 0) {
               const map = /* @__PURE__ */ new Map();
               const tl = [];
-              timelineJsonParsed.forEach((c) => {
-                const key = `${c.valor}|${c.tipo.replace("ED_TEXTO", "ED. TEXTO").replace("ED_IMAGEM", "ED. IMAGEM")}`;
-                map.set(key, { inicio: c.timecode, duracao: c.duracao ?? 5 });
-                tl.push({ nome: c.valor, funcao: c.tipo.replace("ED_TEXTO", "ED. TEXTO").replace("ED_IMAGEM", "ED. IMAGEM"), timecodeInicio: c.timecode, duracao: c.duracao ?? 5 });
+              timelineFallback.forEach((cred) => {
+                map.set(`${cred.line1}|${cred.line2}`, { inicio: cred.inicio, duracao: cred.duracao });
+                tl.push({ nome: cred.line1, funcao: cred.line2, timecodeInicio: cred.inicio, duracao: cred.duracao });
               });
-              laudaSnapshotRef.current = itensLauda;
-              sonorasSnapshotRef.current = sonoras;
-              estruturaSnapshotRef.current = data.estrutura;
               sonorasMapRef.current = map;
               sonorasDisparadosRef.current.clear();
               setSonorasTimeline(tl);
-              console.log(`[Playout] RODA_VT: ${tl.length} timecode(s) do timeline_json aplicados diretamente`);
-            } else if (data.estrutura && itensLauda.length > 0) {
-              const tempoEspelho = itemRows?.[0]?.tempo;
-              let duracaoPrevia = 90;
-              if (tempoEspelho) {
-                const partes = tempoEspelho.split(":").map(Number);
-                if (partes.length === 2) duracaoPrevia = partes[0] * 60 + partes[1];
-                else if (partes.length === 1) duracaoPrevia = partes[0];
-              }
-              console.log(`[Playout] RODA_VT: calculando timecodes via IA (duração prevista: ${duracaoPrevia}s)`);
-              laudaSnapshotRef.current = itensLauda;
-              sonorasSnapshotRef.current = sonoras;
-              estruturaSnapshotRef.current = data.estrutura;
-              const timelineFallback = construirTimelineFallback(itensLauda, duracaoPrevia, sonoras);
-              if (timelineFallback.length > 0) {
-                const map = /* @__PURE__ */ new Map();
-                const tl = [];
-                timelineFallback.forEach((cred) => {
-                  map.set(`${cred.line1}|${cred.line2}`, { inicio: cred.inicio, duracao: cred.duracao });
-                  tl.push({ nome: cred.line1, funcao: cred.line2, timecodeInicio: cred.inicio, duracao: cred.duracao });
-                });
-                sonorasMapRef.current = map;
-                sonorasDisparadosRef.current.clear();
-                setSonorasTimeline(tl);
-                console.log(`[Playout] RODA_VT: ${tl.length} crédito(s) posicionados (fallback) com ${duracaoPrevia}s`);
-              }
-              calcularTimecodesViaIA(data.estrutura, itensLauda, duracaoPrevia, sonoras).then((creditosIA) => {
-                if (creditosIA.length === 0) return;
-                const map = /* @__PURE__ */ new Map();
-                const tl = [];
-                creditosIA.forEach((cred) => {
-                  map.set(`${cred.line1}|${cred.line2}`, { inicio: cred.inicio, duracao: cred.duracao });
-                  tl.push({ nome: cred.line1, funcao: cred.line2, timecodeInicio: cred.inicio, duracao: cred.duracao });
-                });
-                sonorasMapRef.current = map;
-                setSonorasTimeline(tl);
-                console.log(`[Playout] RODA_VT: ${tl.length} timecode(s) calculado(s) pela IA (${duracaoPrevia}s)`);
-                toast.success(`⏱ ${creditosIA.length} crédito(s) posicionados pela IA`, { duration: 2500 });
-              }).catch((err) => console.warn("[Playout] RODA_VT: IA de timecodes falhou:", err));
+              console.log(`[Playout] RODA_VT: ${tl.length} crédito(s) posicionados (fallback) com ${duracaoPrevia}s`);
             }
-            if (data.estrutura) {
-              extractCredits(data.estrutura, data.editor_texto || void 0, data.credito_reporter || void 0).then((autoCredits) => {
-                if (autoCredits.length === 0) return;
-                setGcCreditsQueue((prev) => {
-                  const existing = new Set(prev.map((c) => c.line1.toUpperCase()));
-                  const novos = autoCredits.filter((c) => !existing.has(c.line1.toUpperCase()));
-                  if (novos.length === 0) return prev;
-                  const novaFila = [...prev, ...novos];
-                  if (prev.length === 0 && novaFila.length > 0) {
-                    setGcLine1(novaFila[0].line1);
-                    setGcLine2(novaFila[0].line2);
-                  }
-                  return novaFila;
-                });
-                toast.success(`+${autoCredits.length} créditos sugeridos pela IA`);
-              }).catch((err) => console.error("[Playout] Groq auto-credits erro:", err));
-            }
+            calcularTimecodesViaIA(data.estrutura, itensLauda, duracaoPrevia, sonoras).then((creditosIA) => {
+              if (creditosIA.length === 0) return;
+              const map = /* @__PURE__ */ new Map();
+              const tl = [];
+              creditosIA.forEach((cred) => {
+                map.set(`${cred.line1}|${cred.line2}`, { inicio: cred.inicio, duracao: cred.duracao });
+                tl.push({ nome: cred.line1, funcao: cred.line2, timecodeInicio: cred.inicio, duracao: cred.duracao });
+              });
+              sonorasMapRef.current = map;
+              setSonorasTimeline(tl);
+              console.log(`[Playout] RODA_VT: ${tl.length} timecode(s) calculado(s) pela IA (${duracaoPrevia}s)`);
+              toast.success(`⏱ ${creditosIA.length} crédito(s) posicionados pela IA`, { duration: 2500 });
+            }).catch((err) => console.warn("[Playout] RODA_VT: IA de timecodes falhou:", err));
           }
-        } catch (err) {
-          console.error("[Playout] RODA_VT: erro ao carregar lauda →", err);
+          if (data.estrutura) {
+            extractCredits(data.estrutura, data.editor_texto || void 0, data.credito_reporter || void 0).then((autoCredits) => {
+              if (autoCredits.length === 0) return;
+              setGcCreditsQueue((prev) => {
+                const existing = new Set(prev.map((c) => c.line1.toUpperCase()));
+                const novos = autoCredits.filter((c) => !existing.has(c.line1.toUpperCase()));
+                if (novos.length === 0) return prev;
+                const novaFila = [...prev, ...novos];
+                if (prev.length === 0 && novaFila.length > 0) {
+                  setGcLine1(novaFila[0].line1);
+                  setGcLine2(novaFila[0].line2);
+                }
+                return novaFila;
+              });
+              toast.success(`+${autoCredits.length} créditos sugeridos pela IA`);
+            }).catch((err) => console.error("[Playout] Groq auto-credits erro:", err));
+          }
         }
+      } catch (err) {
+        console.error("[Playout] RODA_VT: erro ao carregar lauda →", err);
       }
+    }
+  }, []);
+  const processRodaVtRef = useRef(processRodaVt);
+  useEffect(() => {
+    processRodaVtRef.current = processRodaVt;
+  }, [processRodaVt]);
+  useEffect(() => {
+    const ch = new BroadcastChannel("desknews_playout_sync");
+    ch.onmessage = (event) => {
+      if (event.data?.type !== "RODA_VT") return;
+      processRodaVtRef.current(event.data?.payload ?? {});
     };
     return () => {
       ch.close();
+    };
+  }, []);
+  useEffect(() => {
+    const lastProcessedIdRef = { current: null };
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const { rows } = await db.query(
+          `SELECT id, materia_id, assunto, item_id, created_at
+           FROM tp_playout_events
+           WHERE event = 'RODA_VT'
+           ORDER BY created_at DESC
+           LIMIT 1`
+        );
+        const latest = rows?.[0];
+        if (!latest || cancelled) return;
+        if (lastProcessedIdRef.current === null) {
+          lastProcessedIdRef.current = latest.id;
+          return;
+        }
+        if (latest.id !== lastProcessedIdRef.current) {
+          lastProcessedIdRef.current = latest.id;
+          processRodaVtRef.current({
+            materiaId: latest.materia_id,
+            assunto: latest.assunto,
+            itemId: latest.item_id
+          });
+        }
+      } catch (err) {
+        console.error("[Playout] Erro no polling de tp_playout_events:", err);
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
     };
   }, []);
   const handleSelectFile = (file) => {
@@ -6268,6 +6442,8 @@ function PlayoutPage() {
       setGcLine2("");
       setGcCreditsQueue([]);
       setGcVisible(false);
+      setTarjaVisible(false);
+      if (pgmChannelRef.current?.readyState === 1) pgmChannelRef.current.send(JSON.stringify({ type: "tarja_hide" }));
       setRemovedLaudaOrdens((prev) => {
         const novo = { ...prev };
         delete novo[data.id];
@@ -6382,6 +6558,10 @@ function PlayoutPage() {
     setPgmCurrentTime(0);
   };
   const handleTake = () => {
+    setTarjaVisible(false);
+    if (pgmChannelRef.current?.readyState === 1) pgmChannelRef.current.send(JSON.stringify({ type: "tarja_hide" }));
+    setGcVisible(false);
+    if (pgmChannelRef.current?.readyState === 1) pgmChannelRef.current.send(JSON.stringify({ type: "gc_hide" }));
     if (isCamPreview && previewCamIdx !== null) {
       const srcType = camSourceTypes[previewCamIdx];
       const rawUrl = camSources[previewCamIdx];
@@ -6553,11 +6733,45 @@ function PlayoutPage() {
       pgmChannelRef.current.send(JSON.stringify({ type: "pgm_take", fileName: selectedFile.name }));
     toast.success(`Fusão concluída: "${selectedFile.name}"`);
   };
+  const handleAutoTrans = useCallback(() => {
+    if (autoTransRunning) return;
+    if (transitionType === "cut") {
+      handleTransition();
+      handleTransComplete();
+      return;
+    }
+    handleTransition();
+    setAutoTransRunning(true);
+    const totalSteps = Math.max(10, autoTransDur);
+    let step = 0;
+    const interval = setInterval(() => {
+      step++;
+      const pct = Math.round(step / totalSteps * 100);
+      setTransValue(pct);
+      applyTransOpacity(pct, activePlayer);
+      if (step >= totalSteps) {
+        clearInterval(interval);
+        autoTransRef.current = null;
+        setAutoTransRunning(false);
+        handleTransComplete();
+      }
+    }, 16);
+    autoTransRef.current = interval;
+  }, [autoTransRunning, transitionType, autoTransDur, activePlayer]);
+  const handleDskLoad = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => setDskPng(reader.result);
+    reader.readAsDataURL(file);
+  };
   const handleSkip = () => {
     if (currentIndex < items.length - 1) {
       const nextIndex = currentIndex + 1;
       setCurrentIndex(nextIndex);
       setCurrentItemId(items[nextIndex]?.id ?? null);
+      setTarjaVisible(false);
+      if (pgmChannelRef.current?.readyState === 1) pgmChannelRef.current.send(JSON.stringify({ type: "tarja_hide" }));
+      setGcVisible(false);
+      if (pgmChannelRef.current?.readyState === 1) pgmChannelRef.current.send(JSON.stringify({ type: "gc_hide" }));
     } else {
       toast.warning("Fim da playlist");
     }
@@ -6614,7 +6828,12 @@ function PlayoutPage() {
   );
   const handleGcTakeQueue = () => {
     setGcVisible(true);
-    pgmChannelRef.current?.readyState === 1 && pgmChannelRef.current.send(JSON.stringify({ type: "gc_show", line1: gcLine1, line2: gcLine2 }));
+    pgmChannelRef.current?.readyState === 1 && pgmChannelRef.current.send(JSON.stringify({
+      type: "gc_show",
+      line1: gcLine1,
+      line2: gcLine2,
+      ...gcLayerConfig || {}
+    }));
     if (gcLine1) removerItemDaLaudaPorNome(gcLine1);
     if (gcLine1 || gcLine2) {
       setGcHistory((prev) => [{ line1: gcLine1, line2: gcLine2 }, ...prev].slice(0, 2));
@@ -6651,13 +6870,6 @@ function PlayoutPage() {
       setGcLine1("");
       setGcLine2("");
       toast("⏭ Fila de créditos esvaziada");
-    }
-  };
-  const handleApplyPreset = (presetName) => {
-    const preset = gcPresets[presetName];
-    if (preset) {
-      setGcLine1(preset.line1);
-      setGcLine2(preset.line2);
     }
   };
   return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 text-white flex flex-col overflow-hidden font-sans", style: { backgroundColor: "#121212", color: "white" }, children: [
@@ -7127,13 +7339,72 @@ function PlayoutPage() {
                       )
                     }
                   ),
-                  gcVisible && (gcLine1 || gcLine2) && /* @__PURE__ */ jsx("div", { className: "absolute bottom-0 left-0 right-0 z-40 px-2 pb-2 animate-in slide-in-from-bottom duration-300", children: /* @__PURE__ */ jsxs("div", { className: "flex items-stretch overflow-hidden rounded", children: [
+                  gcVisible && (gcLine1 || gcLine2) && (gcLayerConfig?.tarjaCustomPng ? /* @__PURE__ */ jsx(
+                    "div",
+                    {
+                      className: "absolute z-40",
+                      style: {
+                        left: `${gcLayerConfig.tarjaX}%`,
+                        top: `${gcLayerConfig.tarjaY}%`,
+                        transform: "translate(-50%, -50%)",
+                        width: `${gcLayerConfig.tarjaScaleX}%`
+                      },
+                      children: /* @__PURE__ */ jsxs("div", { style: { position: "relative", lineHeight: 0 }, children: [
+                        /* @__PURE__ */ jsx(
+                          "img",
+                          {
+                            src: gcLayerConfig.tarjaCustomPng,
+                            alt: "Tarja",
+                            style: { width: "100%", display: "block", height: "auto" }
+                          }
+                        ),
+                        gcLine1 && /* @__PURE__ */ jsx(
+                          "div",
+                          {
+                            style: {
+                              position: "absolute",
+                              left: `${gcLayerConfig.font1X}%`,
+                              top: `${gcLayerConfig.font1Y}%`,
+                              fontSize: gcLayerConfig.font1Size,
+                              fontWeight: 900,
+                              color: "#fff",
+                              textTransform: "uppercase",
+                              whiteSpace: "nowrap",
+                              textShadow: "0 1px 4px rgba(0,0,0,0.8)",
+                              transform: "translateY(-50%)",
+                              fontFamily: "sans-serif"
+                            },
+                            children: gcLine1
+                          }
+                        ),
+                        gcLine2 && /* @__PURE__ */ jsx(
+                          "div",
+                          {
+                            style: {
+                              position: "absolute",
+                              left: `${gcLayerConfig.font2X}%`,
+                              top: `${gcLayerConfig.font2Y}%`,
+                              fontSize: gcLayerConfig.font2Size,
+                              fontWeight: 500,
+                              color: "#d4d4d8",
+                              textTransform: "uppercase",
+                              whiteSpace: "nowrap",
+                              textShadow: "0 1px 4px rgba(0,0,0,0.8)",
+                              transform: "translateY(-50%)",
+                              fontFamily: "sans-serif"
+                            },
+                            children: gcLine2
+                          }
+                        )
+                      ] })
+                    }
+                  ) : /* @__PURE__ */ jsx("div", { className: "absolute bottom-0 left-0 right-0 z-40 px-2 pb-2 animate-in slide-in-from-bottom duration-300", children: /* @__PURE__ */ jsxs("div", { className: "flex items-stretch overflow-hidden rounded", children: [
                     /* @__PURE__ */ jsx("div", { className: "w-1 bg-red-600 shrink-0" }),
                     /* @__PURE__ */ jsxs("div", { className: "bg-black/90 px-2 py-1.5 flex-1 min-w-0", children: [
                       gcLine1 && /* @__PURE__ */ jsx("div", { className: "text-white font-bold text-[10px] uppercase tracking-wide leading-tight truncate", children: gcLine1 }),
                       gcLine2 && /* @__PURE__ */ jsx("div", { className: "text-zinc-400 text-[8px] uppercase tracking-widest truncate mt-0.5", children: gcLine2 })
                     ] })
-                  ] }) }),
+                  ] }) })),
                   tarjaVisible && /* @__PURE__ */ jsx(
                     "div",
                     {
@@ -7525,34 +7796,10 @@ function PlayoutPage() {
                   ]
                 }
               )
-            ] }),
-            multiviewActive && /* @__PURE__ */ jsx("div", { className: "flex items-center gap-1.5 mt-1", children: [1, 2, 3, 4].map((cam) => /* @__PURE__ */ jsxs(
-              "button",
-              {
-                onClick: () => {
-                  setActiveCam(cam);
-                  sendCamToPreview(cam - 1);
-                  if (pgmChannelRef.current?.readyState === 1) {
-                    pgmChannelRef.current.send(JSON.stringify({ type: "cam_take", cam }));
-                  }
-                  toast.success(`CAM ${cam} → PREVIEW`);
-                },
-                className: "flex-1 px-2 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border transition-all active:scale-[0.97]",
-                style: {
-                  backgroundColor: activeCam === cam ? "#f97316" : "#00E676",
-                  borderColor: activeCam === cam ? "#fb923c" : "#00E67650",
-                  color: "#000"
-                },
-                children: [
-                  "CAM ",
-                  cam
-                ]
-              },
-              cam
-            )) })
+            ] })
           ] })
         ] }),
-        /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-[auto_1fr_auto_1fr_auto_auto] gap-0 flex-1 min-h-0", children: [
+        /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-[auto_1fr_auto_auto] gap-0 flex-1 min-h-0", children: [
           /* @__PURE__ */ jsxs(
             "div",
             {
@@ -7724,458 +7971,189 @@ function PlayoutPage() {
               ]
             }
           ),
-          /* @__PURE__ */ jsxs("div", { className: "border rounded-xl p-4 flex flex-col gap-3 w-[380px]", style: { backgroundColor: "#1a1a1a", borderColor: "#2a2a2a" }, children: [
-            /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-              /* @__PURE__ */ jsx("span", { ref: progressTimeRef, className: "text-[9px] font-mono text-zinc-600 w-8 text-right tabular-nums", children: formatDuration(pgmCurrentTime) }),
-              /* @__PURE__ */ jsx("div", { className: "flex-1 h-1.5 bg-zinc-800 rounded-full cursor-pointer relative overflow-hidden group", onClick: handleSeek, children: /* @__PURE__ */ jsx("div", { ref: progressBarRef, className: "h-full rounded-full transition-none relative", style: { width: `${pgmProgress}%`, backgroundColor: "#ef4444" }, children: /* @__PURE__ */ jsx("div", { className: "absolute right-0 top-1/2 -translate-y-1/2 h-2.5 w-2.5 bg-white rounded-full -mr-1 opacity-0 group-hover:opacity-100 transition-opacity shadow" }) }) }),
-              /* @__PURE__ */ jsx("span", { className: "text-[9px] font-mono text-zinc-600 w-8 tabular-nums", children: formatDuration(pgmFile?.duration ?? null) })
-            ] }),
-            /* @__PURE__ */ jsx("div", { className: "text-center", children: /* @__PURE__ */ jsx("p", { className: "text-[9px] font-mono text-zinc-600 truncate", children: pgmFile?.name.replace(".mp4", "") || "Nenhum arquivo no PGM" }) }),
-            /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-center gap-1.5", children: [
-              /* @__PURE__ */ jsxs(
-                "button",
-                {
-                  onClick: handleCue,
-                  title: "CUE",
-                  className: "flex flex-col items-center gap-0.5 px-3 py-2.5 rounded-xl border border-zinc-700 hover:border-zinc-500 transition-all active:scale-[0.98] group",
-                  style: { backgroundColor: "#1f1f1f" },
-                  children: [
-                    /* @__PURE__ */ jsx(SkipBack, { className: "h-4 w-4 text-zinc-500 group-hover:text-white transition-colors" }),
-                    /* @__PURE__ */ jsx("span", { className: "text-[8px] font-bold uppercase tracking-widest text-zinc-600 group-hover:text-zinc-400", children: "CUE" })
-                  ]
-                }
-              ),
-              /* @__PURE__ */ jsxs(
-                "button",
-                {
-                  onClick: handleStop,
-                  title: "STOP",
-                  className: "flex flex-col items-center gap-0.5 px-3 py-2.5 rounded-xl border border-zinc-700 hover:border-red-500/30 transition-all active:scale-[0.98] group",
-                  style: { backgroundColor: "#1f1f1f" },
-                  children: [
-                    /* @__PURE__ */ jsx(Square, { className: "h-4 w-4 text-zinc-500 group-hover:text-red-500 transition-colors" }),
-                    /* @__PURE__ */ jsx("span", { className: "text-[8px] font-bold uppercase tracking-widest text-zinc-600 group-hover:text-red-400", children: "STOP" })
-                  ]
-                }
-              ),
-              /* @__PURE__ */ jsxs(
-                "button",
-                {
-                  onClick: handlePlayPausePgm,
-                  title: isPlaying ? "PAUSE" : "PLAY",
-                  className: cn(
-                    "flex flex-col items-center gap-0.5 px-5 py-2.5 rounded-xl border transition-all active:scale-[0.98]",
-                    isPlaying ? "border-yellow-500/30 text-yellow-400" : "text-black font-bold border-transparent"
-                  ),
-                  style: { backgroundColor: isPlaying ? "#78350f20" : "#00E676" },
-                  children: [
-                    isPlaying ? /* @__PURE__ */ jsx(Pause, { className: "h-4 w-4 text-yellow-400" }) : /* @__PURE__ */ jsx(Play, { className: "h-4 w-4 text-black" }),
-                    /* @__PURE__ */ jsx("span", { className: cn("text-[8px] font-bold uppercase tracking-widest", isPlaying ? "text-yellow-400" : "text-black"), children: isPlaying ? "PAUSE" : "PLAY" })
-                  ]
-                }
-              ),
-              /* @__PURE__ */ jsxs(
-                "button",
-                {
-                  onClick: handleTake,
-                  title: "TAKE",
-                  className: "flex flex-col items-center gap-0.5 px-4 py-2.5 rounded-xl border transition-all active:scale-[0.98]",
-                  style: { backgroundColor: "#00E676", borderColor: "#00E67650" },
-                  children: [
-                    /* @__PURE__ */ jsx(MonitorPlay, { className: "h-4 w-4 text-black" }),
-                    /* @__PURE__ */ jsx("span", { className: "text-[8px] font-bold uppercase tracking-widest text-black", children: "TAKE" })
-                  ]
-                }
-              ),
-              /* @__PURE__ */ jsxs(
-                "button",
-                {
-                  onClick: handleSkip,
-                  title: "SKIP",
-                  className: "flex flex-col items-center gap-0.5 px-3 py-2.5 rounded-xl border border-zinc-700 hover:border-zinc-500 transition-all active:scale-[0.98] group",
-                  style: { backgroundColor: "#1f1f1f" },
-                  children: [
-                    /* @__PURE__ */ jsx(SkipForward, { className: "h-4 w-4 text-zinc-500 group-hover:text-white transition-colors" }),
-                    /* @__PURE__ */ jsx("span", { className: "text-[8px] font-bold uppercase tracking-widest text-zinc-600 group-hover:text-zinc-400", children: "SKIP" })
-                  ]
-                }
-              )
-            ] }),
-            /* @__PURE__ */ jsxs("div", { className: "border-t pt-3 flex flex-col gap-2", style: { borderColor: "#2a2a2a" }, children: [
-              /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between px-1", children: [
-                /* @__PURE__ */ jsx("span", { className: "flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-400", children: "⚙ TRANSIÇÃO" }),
-                /* @__PURE__ */ jsxs("span", { className: "text-[10px] font-mono font-bold", style: { color: transValue > 0 ? "#facc15" : "#52525b" }, children: [
-                  transValue,
-                  "%"
-                ] })
-              ] }),
-              /* @__PURE__ */ jsxs(
-                "div",
-                {
-                  className: "relative flex items-center w-full rounded-xl overflow-hidden",
-                  style: { height: 48, cursor: "ew-resize", backgroundColor: "#0a0a0a", border: "1px solid #2a2a2a" },
-                  onMouseDown: (e) => {
-                    handleTransition();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const onMove = (ev) => {
-                      const pct = Math.min(100, Math.max(0, (ev.clientX - rect.left) / rect.width * 100));
-                      setTransValue(Math.round(pct));
-                      applyTransOpacity(Math.round(pct), activePlayer);
-                    };
-                    const onUp = (ev) => {
-                      const pct = Math.min(100, Math.max(0, (ev.clientX - rect.left) / rect.width * 100));
-                      window.removeEventListener("mousemove", onMove);
-                      window.removeEventListener("mouseup", onUp);
-                      if (pct >= 95) {
-                        handleTransComplete();
-                      } else {
-                        setTransValue(0);
-                        setPlayerAOpacity(activePlayer === "A" ? 1 : 0);
-                        setPlayerAZ(activePlayer === "A" ? 10 : 0);
-                        setPlayerBOpacity(activePlayer === "B" ? 1 : 0);
-                        setPlayerBZ(activePlayer === "B" ? 10 : 0);
-                        const inactiveEl = activePlayer === "A" ? pgmBRef.current : pgmARef.current;
-                        if (inactiveEl) {
-                          inactiveEl.pause();
-                          inactiveEl.src = "";
-                        }
-                      }
-                    };
-                    window.addEventListener("mousemove", onMove);
-                    window.addEventListener("mouseup", onUp);
-                  },
-                  onTouchStart: (e) => {
-                    handleTransition();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const onMove = (ev) => {
-                      const touch = ev.touches[0];
-                      const pct = Math.min(100, Math.max(0, (touch.clientX - rect.left) / rect.width * 100));
-                      setTransValue(Math.round(pct));
-                      applyTransOpacity(Math.round(pct), activePlayer);
-                    };
-                    const onEnd = (ev) => {
-                      const touch = ev.changedTouches[0];
-                      const pct = Math.min(100, Math.max(0, (touch.clientX - rect.left) / rect.width * 100));
-                      window.removeEventListener("touchmove", onMove);
-                      window.removeEventListener("touchend", onEnd);
-                      if (pct >= 95) {
-                        handleTransComplete();
-                      } else {
-                        setTransValue(0);
-                        setPlayerAOpacity(activePlayer === "A" ? 1 : 0);
-                        setPlayerAZ(activePlayer === "A" ? 10 : 0);
-                        setPlayerBOpacity(activePlayer === "B" ? 1 : 0);
-                        setPlayerBZ(activePlayer === "B" ? 10 : 0);
-                        const inactiveEl = activePlayer === "A" ? pgmBRef.current : pgmARef.current;
-                        if (inactiveEl) {
-                          inactiveEl.pause();
-                          inactiveEl.src = "";
-                        }
-                      }
-                    };
-                    window.addEventListener("touchmove", onMove);
-                    window.addEventListener("touchend", onEnd);
-                  },
-                  title: "Arraste para fazer fusão — solte no fim para confirmar",
-                  children: [
-                    /* @__PURE__ */ jsx("div", { className: "absolute inset-x-0", style: { top: "50%", transform: "translateY(-50%)", height: 3, background: "#27272a" } }),
-                    /* @__PURE__ */ jsx(
-                      "div",
-                      {
-                        className: "absolute",
-                        style: {
-                          left: 0,
-                          top: "50%",
-                          transform: "translateY(-50%)",
-                          height: 3,
-                          width: `${transValue}%`,
-                          background: "linear-gradient(90deg, #3b82f6, #00E676)",
-                          boxShadow: transValue > 0 ? "0 0 8px rgba(0,230,118,0.6)" : "none"
-                        }
-                      }
-                    ),
-                    [25, 50, 75].map((tick) => /* @__PURE__ */ jsx("div", { className: "absolute", style: { left: `${tick}%`, top: "50%", transform: "translate(-50%, -50%)", width: 1, height: 14, background: "rgba(255,255,255,0.12)" } }, tick)),
-                    /* @__PURE__ */ jsx(
-                      "div",
-                      {
-                        className: "absolute rounded-full flex items-center justify-center transition-shadow",
-                        style: {
-                          left: `${transValue}%`,
-                          top: "50%",
-                          transform: "translate(-50%, -50%)",
-                          width: 34,
-                          height: 34,
-                          zIndex: 10,
-                          background: transValue > 0 ? "radial-gradient(circle at 35% 35%, #60a5fa, #2563eb)" : "radial-gradient(circle at 35% 35%, #52525b, #27272a)",
-                          boxShadow: transValue > 0 ? "0 0 16px rgba(37,99,235,0.7)" : "0 2px 6px rgba(0,0,0,0.5)",
-                          border: "2px solid rgba(255,255,255,0.15)"
-                        },
-                        children: /* @__PURE__ */ jsx(Play, { className: "h-3.5 w-3.5 text-white fill-white" })
-                      }
-                    )
-                  ]
-                }
-              ),
-              /* @__PURE__ */ jsxs("div", { className: "flex justify-between px-1", children: [
-                /* @__PURE__ */ jsx("span", { className: "text-[8px] font-mono font-bold", style: { color: "#3b82f6" }, children: "PGM" }),
-                /* @__PURE__ */ jsx("span", { className: "text-[8px] font-mono font-bold text-zinc-600", children: "PVW" })
-              ] }),
-              transValue > 0 && /* @__PURE__ */ jsxs("p", { className: "text-center text-[9px] font-mono", style: { color: "#00E676" }, children: [
-                "Transição ativa: ",
-                transValue,
-                "% — Solte em 95%+ para confirmar"
-              ] })
-            ] })
-          ] }),
-          materiaAtual && sonorasTimeline.length > 0 && pgmFile?.duration && /* @__PURE__ */ jsxs("div", { className: "border rounded-xl p-3 flex flex-col gap-2 mt-0", style: { backgroundColor: "#1a1a1a", borderColor: "#2a2a2a" }, children: [
-            /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between pb-1 border-b", style: { borderColor: "#2a2a2a" }, children: [
-              /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold uppercase tracking-widest", style: { color: "#00E676" }, children: "⏱ TIMELINE VT" }),
-              /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-600", children: [
-                formatarTimecode(Math.round(pgmCurrentTime)),
-                " / ",
-                formatarTimecode(Math.round(pgmFile.duration))
-              ] })
-            ] }),
-            /* @__PURE__ */ jsxs("div", { className: "relative h-5 rounded-full overflow-hidden", style: { backgroundColor: "#0a0a0a", border: "1px solid #2a2a2a" }, children: [
-              /* @__PURE__ */ jsx(
-                "div",
-                {
-                  className: "absolute inset-y-0 left-0 rounded-full transition-none",
-                  style: {
-                    width: `${pgmCurrentTime / pgmFile.duration * 100}%`,
-                    backgroundColor: isPlaying ? "#ef4444" : "#3f3f46"
-                  }
-                }
-              ),
-              /* @__PURE__ */ jsx(
-                "div",
-                {
-                  className: "absolute top-0 bottom-0 w-0.5",
-                  style: {
-                    left: `${pgmCurrentTime / pgmFile.duration * 100}%`,
-                    backgroundColor: "#ffffff",
-                    boxShadow: "0 0 4px rgba(255,255,255,0.8)"
-                  }
-                }
-              ),
-              sonorasTimeline.map((cr, idx) => {
-                const pct = Math.min(99, cr.timecodeInicio / pgmFile.duration * 100);
-                const jaPAssou = pgmCurrentTime >= cr.timecodeInicio;
-                return /* @__PURE__ */ jsx(
-                  "div",
-                  {
-                    className: "absolute top-0 bottom-0 w-0.5 transition-colors",
-                    style: {
-                      left: `${pct}%`,
-                      backgroundColor: jaPAssou ? "#22c55e" : "#facc15",
-                      opacity: jaPAssou ? 0.5 : 1
-                    },
-                    title: `${cr.nome} (${cr.funcao}) — ${formatarTimecode(cr.timecodeInicio)}`
-                  },
-                  idx
-                );
-              })
-            ] }),
-            /* @__PURE__ */ jsx("div", { className: "flex flex-col gap-1 max-h-28 overflow-y-auto", children: sonorasTimeline.map((cr, idx) => {
-              const jaPassou = pgmCurrentTime >= cr.timecodeInicio + cr.duracao;
-              const ativo = pgmCurrentTime >= cr.timecodeInicio && pgmCurrentTime < cr.timecodeInicio + cr.duracao;
-              const proximo = !jaPassou && !ativo && sonorasTimeline.findIndex((c) => !(pgmCurrentTime >= c.timecodeInicio + c.duracao)) === idx;
-              return /* @__PURE__ */ jsxs(
-                "div",
-                {
-                  className: "flex items-center gap-2 px-2 py-1 rounded-lg transition-all",
-                  style: {
-                    backgroundColor: ativo ? "#00E67615" : jaPassou ? "#1a1a1a" : "#252525",
-                    border: `1px solid ${ativo ? "#00E676" : jaPassou ? "#2a2a2a" : proximo ? "#facc1550" : "#2a2a2a"}`
-                  },
-                  children: [
-                    /* @__PURE__ */ jsx(
-                      "div",
-                      {
-                        className: "h-1.5 w-1.5 rounded-full shrink-0",
-                        style: { backgroundColor: ativo ? "#00E676" : jaPassou ? "#3f3f46" : "#facc15" }
-                      }
-                    ),
-                    /* @__PURE__ */ jsxs("div", { className: "min-w-0 flex-1", children: [
-                      /* @__PURE__ */ jsx("div", { className: "text-[9px] font-bold text-white truncate", children: cr.nome }),
-                      /* @__PURE__ */ jsx("div", { className: "text-[8px] text-zinc-500 truncate", children: cr.funcao })
-                    ] }),
-                    /* @__PURE__ */ jsx("span", { className: "text-[8px] font-mono shrink-0", style: { color: ativo ? "#00E676" : "#52525b" }, children: formatarTimecode(cr.timecodeInicio) }),
-                    ativo && /* @__PURE__ */ jsx("span", { className: "text-[7px] font-black uppercase tracking-widest animate-pulse shrink-0", style: { color: "#00E676" }, children: "NO AR" }),
-                    jaPassou && /* @__PURE__ */ jsx("span", { className: "text-[7px] font-bold uppercase tracking-widest shrink-0 text-zinc-600", children: "✓" })
-                  ]
-                },
-                idx
-              );
-            }) })
-          ] }),
-          /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-3 w-[480px] overflow-y-auto", style: { backgroundColor: "#121212" }, children: [
-            /* @__PURE__ */ jsxs("div", { className: "border rounded-xl p-3 flex flex-col gap-3", style: { backgroundColor: "#1a1a1a", borderColor: "#2a2a2a" }, children: [
+          /* @__PURE__ */ jsxs("div", { className: "flex flex-row gap-2 min-h-0 overflow-hidden", children: [
+            /* @__PURE__ */ jsxs("div", { className: "border rounded-xl p-4 flex flex-col gap-3 shrink-0", style: { backgroundColor: "#1a1a1a", borderColor: "#2a2a2a", width: 320 }, children: [
               /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-                /* @__PURE__ */ jsx(Type, { className: "h-3 w-3 text-zinc-500" }),
-                /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold uppercase tracking-widest text-zinc-400", children: "GC — Gerador" })
+                /* @__PURE__ */ jsx("span", { ref: progressTimeRef, className: "text-[9px] font-mono text-zinc-600 w-8 text-right tabular-nums", children: formatDuration(pgmCurrentTime) }),
+                /* @__PURE__ */ jsx("div", { className: "flex-1 h-1.5 bg-zinc-800 rounded-full cursor-pointer relative overflow-hidden group", onClick: handleSeek, children: /* @__PURE__ */ jsx("div", { ref: progressBarRef, className: "h-full rounded-full transition-none relative", style: { width: `${pgmProgress}%`, backgroundColor: "#ef4444" }, children: /* @__PURE__ */ jsx("div", { className: "absolute right-0 top-1/2 -translate-y-1/2 h-2.5 w-2.5 bg-white rounded-full -mr-1 opacity-0 group-hover:opacity-100 transition-opacity shadow" }) }) }),
+                /* @__PURE__ */ jsx("span", { className: "text-[9px] font-mono text-zinc-600 w-8 tabular-nums", children: formatDuration(pgmFile?.duration ?? null) })
               ] }),
-              /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-[2fr_1fr] gap-2", children: [
-                /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-1.5", children: [
-                  /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-0.5", children: [
-                    /* @__PURE__ */ jsx("label", { className: "text-[8px] uppercase tracking-widest text-zinc-600", children: "Linha 1 — Nome" }),
-                    /* @__PURE__ */ jsx(
-                      "input",
-                      {
-                        type: "text",
-                        value: gcLine1,
-                        onChange: (e) => setGcLine1(e.target.value),
-                        placeholder: "Nome / Título",
-                        className: "w-full border rounded px-2 py-1 text-[10px] font-mono text-zinc-200 placeholder:text-zinc-700 focus:outline-none transition-all",
-                        style: { backgroundColor: "#252525", borderColor: "#333" }
-                      }
-                    )
-                  ] }),
-                  /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-0.5", children: [
-                    /* @__PURE__ */ jsx("label", { className: "text-[8px] uppercase tracking-widest text-zinc-600", children: "Linha 2 — Cargo" }),
-                    /* @__PURE__ */ jsx(
-                      "input",
-                      {
-                        type: "text",
-                        value: gcLine2,
-                        onChange: (e) => setGcLine2(e.target.value),
-                        placeholder: "Cargo / Informação",
-                        className: "w-full border rounded px-2 py-1 text-[10px] font-mono text-zinc-200 placeholder:text-zinc-700 focus:outline-none transition-all",
-                        style: { backgroundColor: "#252525", borderColor: "#333" }
-                      }
-                    )
-                  ] }),
-                  /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5", children: [
-                    /* @__PURE__ */ jsx("label", { className: "text-[8px] uppercase tracking-widest text-zinc-600 shrink-0", children: "Dur.:" }),
-                    /* @__PURE__ */ jsxs(
-                      "select",
-                      {
-                        value: gcDuration,
-                        onChange: (e) => setGcDuration(Number(e.target.value)),
-                        className: "flex-1 border rounded px-1.5 py-1 text-[9px] font-mono text-zinc-200 focus:outline-none transition-all",
-                        style: { backgroundColor: "#252525", borderColor: "#333" },
-                        children: [
-                          /* @__PURE__ */ jsx("option", { value: 0, children: "Manual" }),
-                          /* @__PURE__ */ jsx("option", { value: 3, children: "3s" }),
-                          /* @__PURE__ */ jsx("option", { value: 5, children: "5s" }),
-                          /* @__PURE__ */ jsx("option", { value: 10, children: "10s" })
-                        ]
-                      }
-                    )
-                  ] })
-                ] }),
-                /* @__PURE__ */ jsxs("div", { className: "relative w-full aspect-video bg-black rounded border border-zinc-800 overflow-hidden", children: [
-                  /* @__PURE__ */ jsx("div", { className: "absolute inset-0 flex items-center justify-center text-zinc-800 text-[6px] uppercase tracking-widest", children: "GC Prev" }),
-                  gcLine1 || gcLine2 ? /* @__PURE__ */ jsx("div", { className: "absolute bottom-0 left-0 right-0 px-0.5 pb-0.5", children: /* @__PURE__ */ jsxs("div", { className: "flex items-stretch overflow-hidden rounded-sm", children: [
-                    /* @__PURE__ */ jsx("div", { className: "w-0.5 bg-red-600 shrink-0" }),
-                    /* @__PURE__ */ jsxs("div", { className: "bg-black/90 px-1 py-0.5 flex-1 min-w-0", children: [
-                      gcLine1 && /* @__PURE__ */ jsx("div", { className: "text-white font-bold text-[6px] uppercase truncate", children: gcLine1 }),
-                      gcLine2 && /* @__PURE__ */ jsx("div", { className: "text-zinc-400 text-[5px] uppercase truncate", children: gcLine2 })
-                    ] })
-                  ] }) }) : null
-                ] })
-              ] }),
-              /* @__PURE__ */ jsxs("div", { className: "flex gap-1.5", children: [
-                /* @__PURE__ */ jsx(
+              /* @__PURE__ */ jsx("div", { className: "text-center", children: /* @__PURE__ */ jsx("p", { className: "text-[9px] font-mono text-zinc-600 truncate", children: pgmFile?.name.replace(".mp4", "") || "Nenhum arquivo no PGM" }) }),
+              /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-center gap-1.5", children: [
+                /* @__PURE__ */ jsxs(
                   "button",
                   {
-                    onClick: handleGcTakeQueue,
-                    className: "flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border text-[9px] font-bold uppercase tracking-widest text-white transition-all active:scale-[0.98]",
-                    style: { backgroundColor: "#00E67620", borderColor: "#00E67640", color: "#00E676" },
-                    children: "GC TAKE"
-                  }
-                ),
-                /* @__PURE__ */ jsx(
-                  "button",
-                  {
-                    onClick: handleGcClear,
-                    className: "flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border border-red-500/30 text-[9px] font-bold uppercase tracking-widest text-red-400 transition-all active:scale-[0.98]",
-                    style: { backgroundColor: "#ef444420" },
-                    children: "GC CLR"
-                  }
-                ),
-                /* @__PURE__ */ jsx(
-                  "button",
-                  {
-                    onClick: handleGcSkip,
-                    disabled: gcCreditsQueue.length === 0,
-                    className: "flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border border-zinc-600 text-[9px] font-bold uppercase tracking-widest text-zinc-400 transition-all active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed",
-                    style: { backgroundColor: "#252525" },
-                    children: "PULAR"
+                    onClick: handleCue,
+                    title: "CUE",
+                    className: "flex flex-col items-center gap-0.5 px-3 py-2.5 rounded-xl border border-zinc-700 hover:border-zinc-500 transition-all active:scale-[0.98] group",
+                    style: { backgroundColor: "#1f1f1f" },
+                    children: [
+                      /* @__PURE__ */ jsx(SkipBack, { className: "h-4 w-4 text-zinc-500 group-hover:text-white transition-colors" }),
+                      /* @__PURE__ */ jsx("span", { className: "text-[8px] font-bold uppercase tracking-widest text-zinc-600 group-hover:text-zinc-400", children: "CUE" })
+                    ]
                   }
                 ),
                 /* @__PURE__ */ jsxs(
                   "button",
                   {
-                    onClick: () => setGcPanelOpen(true),
-                    className: "flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border text-[9px] font-bold uppercase tracking-widest transition-all active:scale-[0.98]",
-                    style: { backgroundColor: "#7c3aed20", borderColor: "#7c3aed40", color: "#c084fc" },
+                    onClick: handleStop,
+                    title: "STOP",
+                    className: "flex flex-col items-center gap-0.5 px-3 py-2.5 rounded-xl border border-zinc-700 hover:border-red-500/30 transition-all active:scale-[0.98] group",
+                    style: { backgroundColor: "#1f1f1f" },
                     children: [
-                      /* @__PURE__ */ jsx(Sliders, { className: "h-3 w-3" }),
-                      "Personalizar"
+                      /* @__PURE__ */ jsx(Square, { className: "h-4 w-4 text-zinc-500 group-hover:text-red-500 transition-colors" }),
+                      /* @__PURE__ */ jsx("span", { className: "text-[8px] font-bold uppercase tracking-widest text-zinc-600 group-hover:text-red-400", children: "STOP" })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxs(
+                  "button",
+                  {
+                    onClick: handlePlayPausePgm,
+                    title: isPlaying ? "PAUSE" : "PLAY",
+                    className: cn(
+                      "flex flex-col items-center gap-0.5 px-5 py-2.5 rounded-xl border transition-all active:scale-[0.98]",
+                      isPlaying ? "border-yellow-500/30 text-yellow-400" : "text-black font-bold border-transparent"
+                    ),
+                    style: { backgroundColor: isPlaying ? "#78350f20" : "#00E676" },
+                    children: [
+                      isPlaying ? /* @__PURE__ */ jsx(Pause, { className: "h-4 w-4 text-yellow-400" }) : /* @__PURE__ */ jsx(Play, { className: "h-4 w-4 text-black" }),
+                      /* @__PURE__ */ jsx("span", { className: cn("text-[8px] font-bold uppercase tracking-widest", isPlaying ? "text-yellow-400" : "text-black"), children: isPlaying ? "PAUSE" : "PLAY" })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxs(
+                  "button",
+                  {
+                    onClick: handleTake,
+                    title: "TAKE",
+                    className: "flex flex-col items-center gap-0.5 px-4 py-2.5 rounded-xl border transition-all active:scale-[0.98]",
+                    style: { backgroundColor: "#00E676", borderColor: "#00E67650" },
+                    children: [
+                      /* @__PURE__ */ jsx(MonitorPlay, { className: "h-4 w-4 text-black" }),
+                      /* @__PURE__ */ jsx("span", { className: "text-[8px] font-bold uppercase tracking-widest text-black", children: "TAKE" })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxs(
+                  "button",
+                  {
+                    onClick: handleSkip,
+                    title: "SKIP",
+                    className: "flex flex-col items-center gap-0.5 px-3 py-2.5 rounded-xl border border-zinc-700 hover:border-zinc-500 transition-all active:scale-[0.98] group",
+                    style: { backgroundColor: "#1f1f1f" },
+                    children: [
+                      /* @__PURE__ */ jsx(SkipForward, { className: "h-4 w-4 text-zinc-500 group-hover:text-white transition-colors" }),
+                      /* @__PURE__ */ jsx("span", { className: "text-[8px] font-bold uppercase tracking-widest text-zinc-600 group-hover:text-zinc-400", children: "SKIP" })
                     ]
                   }
                 )
               ] }),
-              /* @__PURE__ */ jsxs("div", { className: "border-t pt-2 flex flex-col gap-1.5", style: { borderColor: "#2a2a2a" }, children: [
-                /* @__PURE__ */ jsx("label", { className: "text-[8px] uppercase tracking-widest text-zinc-600", children: "Presets Rápidos:" }),
-                /* @__PURE__ */ jsx("div", { className: "flex flex-col gap-1", children: Object.keys(gcPresets).map((presetName) => /* @__PURE__ */ jsx(
-                  "button",
-                  {
-                    onClick: () => handleApplyPreset(presetName),
-                    className: "w-full px-2 py-1 rounded text-[8px] font-bold uppercase tracking-widest border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-all active:scale-95",
-                    style: { backgroundColor: "#252525" },
-                    children: presetName
-                  },
-                  presetName
-                )) })
+              materiaAtual && sonorasTimeline.length > 0 && pgmFile?.duration && /* @__PURE__ */ jsxs("div", { className: "border rounded-xl p-3 flex flex-col gap-2 mt-0", style: { backgroundColor: "#1a1a1a", borderColor: "#2a2a2a" }, children: [
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between pb-1 border-b", style: { borderColor: "#2a2a2a" }, children: [
+                  /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold uppercase tracking-widest", style: { color: "#00E676" }, children: "⏱ TIMELINE VT" }),
+                  /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-600", children: [
+                    formatarTimecode(Math.round(pgmCurrentTime)),
+                    " / ",
+                    formatarTimecode(Math.round(pgmFile.duration))
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "relative h-5 rounded-full overflow-hidden", style: { backgroundColor: "#0a0a0a", border: "1px solid #2a2a2a" }, children: [
+                  /* @__PURE__ */ jsx(
+                    "div",
+                    {
+                      className: "absolute inset-y-0 left-0 rounded-full transition-none",
+                      style: {
+                        width: `${pgmCurrentTime / pgmFile.duration * 100}%`,
+                        backgroundColor: isPlaying ? "#ef4444" : "#3f3f46"
+                      }
+                    }
+                  ),
+                  /* @__PURE__ */ jsx(
+                    "div",
+                    {
+                      className: "absolute top-0 bottom-0 w-0.5",
+                      style: {
+                        left: `${pgmCurrentTime / pgmFile.duration * 100}%`,
+                        backgroundColor: "#ffffff",
+                        boxShadow: "0 0 4px rgba(255,255,255,0.8)"
+                      }
+                    }
+                  ),
+                  sonorasTimeline.map((cr, idx) => {
+                    const pct = Math.min(99, cr.timecodeInicio / pgmFile.duration * 100);
+                    const jaPAssou = pgmCurrentTime >= cr.timecodeInicio;
+                    return /* @__PURE__ */ jsx(
+                      "div",
+                      {
+                        className: "absolute top-0 bottom-0 w-0.5 transition-colors",
+                        style: {
+                          left: `${pct}%`,
+                          backgroundColor: jaPAssou ? "#22c55e" : "#facc15",
+                          opacity: jaPAssou ? 0.5 : 1
+                        },
+                        title: `${cr.nome} (${cr.funcao}) — ${formatarTimecode(cr.timecodeInicio)}`
+                      },
+                      idx
+                    );
+                  })
+                ] }),
+                /* @__PURE__ */ jsx("div", { className: "flex flex-col gap-1 max-h-28 overflow-y-auto", children: sonorasTimeline.map((cr, idx) => {
+                  const jaPassou = pgmCurrentTime >= cr.timecodeInicio + cr.duracao;
+                  const ativo = pgmCurrentTime >= cr.timecodeInicio && pgmCurrentTime < cr.timecodeInicio + cr.duracao;
+                  const proximo = !jaPassou && !ativo && sonorasTimeline.findIndex((c) => !(pgmCurrentTime >= c.timecodeInicio + c.duracao)) === idx;
+                  return /* @__PURE__ */ jsxs(
+                    "div",
+                    {
+                      className: "flex items-center gap-2 px-2 py-1 rounded-lg transition-all",
+                      style: {
+                        backgroundColor: ativo ? "#00E67615" : jaPassou ? "#1a1a1a" : "#252525",
+                        border: `1px solid ${ativo ? "#00E676" : jaPassou ? "#2a2a2a" : proximo ? "#facc1550" : "#2a2a2a"}`
+                      },
+                      children: [
+                        /* @__PURE__ */ jsx(
+                          "div",
+                          {
+                            className: "h-1.5 w-1.5 rounded-full shrink-0",
+                            style: { backgroundColor: ativo ? "#00E676" : jaPassou ? "#3f3f46" : "#facc15" }
+                          }
+                        ),
+                        /* @__PURE__ */ jsxs("div", { className: "min-w-0 flex-1", children: [
+                          /* @__PURE__ */ jsx("div", { className: "text-[9px] font-bold text-white truncate", children: cr.nome }),
+                          /* @__PURE__ */ jsx("div", { className: "text-[8px] text-zinc-500 truncate", children: cr.funcao })
+                        ] }),
+                        /* @__PURE__ */ jsx("span", { className: "text-[8px] font-mono shrink-0", style: { color: ativo ? "#00E676" : "#52525b" }, children: formatarTimecode(cr.timecodeInicio) }),
+                        ativo && /* @__PURE__ */ jsx("span", { className: "text-[7px] font-black uppercase tracking-widest animate-pulse shrink-0", style: { color: "#00E676" }, children: "NO AR" }),
+                        jaPassou && /* @__PURE__ */ jsx("span", { className: "text-[7px] font-bold uppercase tracking-widest shrink-0 text-zinc-600", children: "✓" })
+                      ]
+                    },
+                    idx
+                  );
+                }) })
               ] })
             ] }),
-            /* @__PURE__ */ jsxs("div", { className: "border rounded-xl p-3 flex flex-col gap-3", style: { backgroundColor: "#1a1a1a", borderColor: "#2a2a2a" }, children: [
-              /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold uppercase tracking-widest text-zinc-400", children: "⚙️ AJUSTES & EFEITOS" }),
-              /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-2", children: [
-                /* @__PURE__ */ jsx(
-                  "button",
-                  {
-                    onClick: () => setTarjaPanelOpen((v) => !v),
-                    className: cn(
-                      "flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl border text-[9px] font-bold uppercase tracking-widest transition-all active:scale-[0.98]",
-                      tarjaPanelOpen ? "border-zinc-500 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
-                    ),
-                    style: { backgroundColor: tarjaPanelOpen ? "#3f3f46" : "#252525" },
-                    title: "Abrir controles da tarja",
-                    children: "🎞 TARJA"
-                  }
-                ),
-                /* @__PURE__ */ jsx(
-                  "button",
-                  {
-                    onClick: () => {
-                      const next = !tarjaVisible;
-                      setTarjaVisible(next);
-                      pgmChannelRef.current?.readyState === 1 && pgmChannelRef.current.send(JSON.stringify({ type: next ? "tarja_show" : "tarja_hide" }));
-                    },
-                    className: cn(
-                      "flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl border text-[9px] font-bold uppercase tracking-widest transition-all active:scale-[0.98]"
-                    ),
-                    style: {
-                      backgroundColor: tarjaVisible ? "#00E67620" : "#252525",
-                      borderColor: tarjaVisible ? "#00E67640" : "#3f3f46",
-                      color: tarjaVisible ? "#00E676" : "#71717a"
-                    },
-                    children: tarjaVisible ? "● TARJA ON" : "○ TARJA OFF"
-                  }
-                ),
-                /* @__PURE__ */ jsx(
-                  "button",
-                  {
-                    disabled: true,
-                    className: "flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl border border-zinc-800 text-[9px] font-bold text-zinc-700 transition-all opacity-40 cursor-default",
-                    style: { backgroundColor: "#1a1a1a" },
-                    children: "—"
-                  }
-                ),
-                /* @__PURE__ */ jsx(
+            /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2 overflow-y-auto", style: { backgroundColor: "#121212", width: 400, minWidth: 400 }, children: [
+              /* @__PURE__ */ jsx(
+                GcPanel,
+                {
+                  gcLine1,
+                  setGcLine1,
+                  gcLine2,
+                  setGcLine2,
+                  gcDuration,
+                  setGcDuration,
+                  gcVisible,
+                  setGcVisible,
+                  gcCreditsQueue,
+                  onTake: handleGcTakeQueue,
+                  onClear: handleGcClear,
+                  onSkip: handleGcSkip,
+                  onLayerChange: handleGcLayerChange
+                }
+              ),
+              /* @__PURE__ */ jsxs("div", { className: "border rounded-xl p-3 flex flex-col gap-3", style: { backgroundColor: "#1a1a1a", borderColor: "#2a2a2a" }, children: [
+                /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold uppercase tracking-widest text-zinc-400", children: "⚙️ AJUSTES & EFEITOS" }),
+                /* @__PURE__ */ jsx("div", { className: "flex gap-2", children: /* @__PURE__ */ jsx(
                   "button",
                   {
                     onClick: () => {
@@ -8192,419 +8170,829 @@ function PlayoutPage() {
                         setLastClickTime(now);
                       }
                     },
-                    className: "flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl border border-red-500/20 text-[9px] font-bold uppercase text-red-400 transition-all active:scale-[0.98]",
+                    className: "flex-1 flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl border border-red-500/20 text-[9px] font-bold uppercase text-red-400 transition-all active:scale-[0.98]",
                     style: { backgroundColor: "#7f1d1d30" },
                     title: "Clique 2x para deletar toda a lauda",
                     children: "🗑️ ERASE"
                   }
-                )
+                ) })
               ] })
-            ] }),
-            /* @__PURE__ */ jsxs("div", { className: "border rounded-xl p-3 flex flex-col gap-2", style: { backgroundColor: "#1a1a1a", borderColor: "#2a2a2a" }, children: [
-              /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold uppercase tracking-widest text-zinc-400", children: "🖼️ FRAMES & OVERLAY" }),
-              /* @__PURE__ */ jsx("div", { className: "grid grid-cols-4 gap-2 p-3 bg-[#1a1a1a] rounded border border-[#2a2a2a]", children: [0, 1, 2, 3].map((id) => /* @__PURE__ */ jsxs(
-                "button",
-                {
-                  onClick: () => handleMeFrameClick(id),
-                  className: cn(
-                    "aspect-square bg-[#121212] border-2 rounded flex flex-col items-center justify-center transition-all group overflow-hidden relative",
-                    meActiveFrame === id ? "border-[#00E676] shadow-[0_0_12px_rgba(0,230,118,0.5)]" : "border-[#2a2a2a] hover:border-[#00E676]"
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs(
+            "div",
+            {
+              className: "border rounded-xl flex flex-col overflow-hidden ml-3",
+              style: { backgroundColor: "#111", borderColor: "#222", width: 280 },
+              children: [
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between px-3 py-2 border-b", style: { borderColor: "#222", background: "linear-gradient(90deg,#0a0a0a,#181818)" }, children: [
+                  /* @__PURE__ */ jsx("span", { className: "text-[10px] font-black uppercase tracking-widest", style: { color: "#00E676" }, children: "📺 TELEPROMPTER" }),
+                  /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1", children: [
+                    /* @__PURE__ */ jsx("div", { className: cn("h-1.5 w-1.5 rounded-full", tpConnected ? "animate-pulse" : ""), style: { backgroundColor: tpConnected ? "#00E676" : "#52525b" } }),
+                    /* @__PURE__ */ jsx("span", { className: "text-[8px] font-mono uppercase tracking-widest", style: { color: tpConnected ? "#00E676" : "#52525b" }, children: tpConnected ? "AO VIVO" : "SEM SINAL" })
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsx("div", { className: "px-3 py-1 border-b", style: { borderColor: "#1a1a1a" }, children: /* @__PURE__ */ jsxs("span", { className: "text-[7px] font-mono text-zinc-700 truncate block", title: "Canal de sincronização — precisa ser idêntico ao mostrado no tp.tsx", children: [
+                  "canal: tp-sync-",
+                  (programa || "geral").trim().toLowerCase()
+                ] }) }),
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5 px-3 py-2 border-b", style: { borderColor: "#1a1a1a" }, children: [
+                  /* @__PURE__ */ jsx(
+                    "button",
+                    {
+                      onClick: handleForceTpMaster,
+                      title: "Manda a tela do teleprompter (tp.tsx) virar MASTER automaticamente",
+                      className: "flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border text-[8px] font-black uppercase tracking-widest transition-all active:scale-[0.97]",
+                      style: { backgroundColor: "#00E67615", borderColor: "#00E67640", color: "#00E676" },
+                      children: "🎙️ MASTER"
+                    }
                   ),
-                  title: meFrames[id] ? `FRAME ${id + 1}` : "Carregar PNG",
-                  children: [
-                    meFrames[id] ? /* @__PURE__ */ jsxs(Fragment, { children: [
-                      /* @__PURE__ */ jsx("img", { src: meFrames[id], alt: `Frame ${id + 1}`, className: "absolute inset-0 w-full h-full object-contain p-1" }),
-                      /* @__PURE__ */ jsx(
+                  /* @__PURE__ */ jsxs(
+                    "button",
+                    {
+                      onClick: handleManualTpSync,
+                      title: "Reler o estado do teleprompter agora, sem esperar",
+                      disabled: tpSyncingNow,
+                      className: "flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border text-[8px] font-black uppercase tracking-widest transition-all active:scale-[0.97] disabled:opacity-50",
+                      style: { backgroundColor: "#3b82f615", borderColor: "#3b82f640", color: "#3b82f6" },
+                      children: [
+                        /* @__PURE__ */ jsx(RefreshCw, { className: cn("h-2.5 w-2.5", tpSyncingNow && "animate-spin") }),
+                        " SYNC"
+                      ]
+                    }
+                  )
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "flex-1 min-h-0 flex flex-col p-3 gap-2", children: [
+                  tpCurrentItem?.assunto && /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500 truncate", children: tpCurrentItem.assunto }),
+                  /* @__PURE__ */ jsx(
+                    "div",
+                    {
+                      className: "flex-1 min-h-0 overflow-y-auto rounded-lg border px-3 py-2.5",
+                      style: { backgroundColor: "#0a0a0a", borderColor: "#222" },
+                      children: tpCurrentItem?.cabeca ? /* @__PURE__ */ jsx("p", { className: "text-[13px] leading-relaxed text-zinc-200 whitespace-pre-wrap", children: tpCurrentItem.cabeca }) : /* @__PURE__ */ jsx("p", { className: "text-[11px] italic text-zinc-700 text-center py-8", children: tpConnected ? "Sem texto de cabeça para este item." : "Aguardando conexão com o teleprompter…" })
+                    }
+                  )
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "px-3 py-2 border-t flex flex-col gap-1", style: { borderColor: "#222", background: "#0d0d0d" }, children: [
+                  /* @__PURE__ */ jsx("span", { className: "text-[8px] font-black uppercase tracking-widest text-zinc-600", children: "▶ Próxima cabeça" }),
+                  tpNextItem ? /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-0.5", children: [
+                    /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold text-amber-400 truncate", children: tpNextItem.assunto || "Sem título" }),
+                    /* @__PURE__ */ jsx("span", { className: "text-[10px] text-zinc-400 line-clamp-2", children: tpNextItem.cabeca ? tpNextItem.cabeca.slice(0, 90) + (tpNextItem.cabeca.length > 90 ? "…" : "") : "Sem texto de cabeça cadastrado." })
+                  ] }) : /* @__PURE__ */ jsx("span", { className: "text-[10px] text-zinc-700 italic", children: "— fim da sequência —" })
+                ] })
+              ]
+            }
+          ),
+          /* @__PURE__ */ jsxs(
+            "div",
+            {
+              className: "border rounded-xl flex flex-col overflow-hidden ml-3",
+              style: { backgroundColor: "#111", borderColor: "#222", minWidth: 820, maxWidth: 960 },
+              children: [
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between px-3 py-2 border-b", style: { borderColor: "#222", background: "linear-gradient(90deg,#0a0a0a,#181818)" }, children: [
+                  /* @__PURE__ */ jsx("span", { className: "text-[10px] font-black uppercase tracking-widest", style: { color: "#00E676" }, children: "⬡ SWITCHER" }),
+                  /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5", children: [
+                    /* @__PURE__ */ jsx("span", { className: "text-[8px] font-mono px-1.5 py-0.5 rounded", style: { backgroundColor: "#ef444420", color: "#ef4444", border: "1px solid #ef444440" }, children: "PGM" }),
+                    /* @__PURE__ */ jsx("span", { className: "text-[8px] font-mono px-1.5 py-0.5 rounded", style: { backgroundColor: "#3b82f620", color: "#3b82f6", border: "1px solid #3b82f640" }, children: "PVW" })
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-[230px_1fr_1fr] gap-0 flex-1 min-h-0", children: [
+                  /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-0 px-3 py-3 border-r overflow-y-auto", style: { borderColor: "#1e1e1e" }, children: [
+                    /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-1 mb-2", children: [
+                      /* @__PURE__ */ jsx("span", { className: "text-[8px] font-black uppercase tracking-widest text-zinc-600 px-0.5", children: "Tipo de Transição" }),
+                      /* @__PURE__ */ jsx("div", { className: "flex gap-1", children: [
+                        { key: "cut", label: "✂ CUT", bg: "#facc15", fg: "#000", glow: "rgba(250,204,21,0.35)" },
+                        { key: "dissolve", label: "◎ MIX", bg: "#8b5cf6", fg: "#fff", glow: "rgba(139,92,246,0.35)" },
+                        { key: "wipe", label: "▷ WIPE", bg: "#0ea5e9", fg: "#fff", glow: "rgba(14,165,233,0.35)" }
+                      ].map(({ key, label, bg, fg, glow }) => /* @__PURE__ */ jsx(
                         "button",
                         {
-                          onClick: (e) => handleMeFrameClear(id, e),
-                          title: "Remover imagem",
-                          className: "absolute top-0.5 right-0.5 z-20 flex items-center justify-center w-4 h-4 rounded-full bg-black/70 border border-zinc-600 text-zinc-400 hover:text-red-400 hover:border-red-400 transition-all",
-                          children: /* @__PURE__ */ jsx(X, { className: "h-2.5 w-2.5" })
-                        }
-                      )
-                    ] }) : /* @__PURE__ */ jsx(Image, { className: "text-slate-600 group-hover:text-[#00E676]", size: 18 }),
-                    /* @__PURE__ */ jsxs("span", { className: cn(
-                      "text-[9px] mt-1 z-10 px-1 rounded",
-                      meActiveFrame === id ? "text-[#00E676] font-bold bg-black/60" : "text-slate-500 bg-black/60"
-                    ), children: [
-                      "FRAME ",
-                      id + 1
-                    ] }),
-                    /* @__PURE__ */ jsx(
-                      "input",
-                      {
-                        ref: (el) => {
-                          meFileInputRefs.current[id] = el;
+                          onClick: () => setTransitionType(key),
+                          className: "flex-1 py-1.5 rounded text-[8px] font-black uppercase tracking-widest border transition-all active:scale-[0.97]",
+                          style: {
+                            backgroundColor: transitionType === key ? bg : "#1a1a1a",
+                            borderColor: transitionType === key ? bg : "#2a2a2a",
+                            color: transitionType === key ? fg : "#52525b",
+                            boxShadow: transitionType === key ? `0 0 8px ${glow}` : "none"
+                          },
+                          children: label
                         },
-                        type: "file",
-                        accept: "image/png",
-                        className: "hidden",
-                        onChange: (e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleMeFrameLoad(id, file);
-                          e.target.value = "";
-                        }
-                      }
-                    )
-                  ]
-                },
-                id
-              )) })
-            ] }),
-            /* @__PURE__ */ jsxs("div", { className: "border rounded-xl p-3 flex flex-col overflow-hidden", style: { backgroundColor: "#1a1a1a", borderColor: "#2a2a2a" }, children: [
-              /* @__PURE__ */ jsx("div", { className: "pb-2 border-b-2 border-zinc-700 mb-3 flex items-center gap-2", children: /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold uppercase tracking-widest text-zinc-600", children: "— VAGA" }) }),
-              /* @__PURE__ */ jsx("div", { className: "flex-1 flex flex-col items-center justify-center gap-2 border-2 border-dashed border-white/5 rounded-xl", children: /* @__PURE__ */ jsx("span", { className: "text-[10px] uppercase tracking-widest text-center px-3 text-zinc-700", children: "Disponível" }) })
-            ] }),
-            /* @__PURE__ */ jsx("div", { className: "border rounded-xl p-3 flex flex-col overflow-hidden", style: { backgroundColor: "#1a1a1a", borderColor: "#2a2a2a" }, children: /* @__PURE__ */ jsx("div", { className: "flex-1 flex flex-col items-center justify-center border-2 border-dashed border-white/5 rounded-xl" }) }),
-            /* @__PURE__ */ jsx("div", { className: "border rounded-xl p-3 flex flex-col overflow-hidden", style: { backgroundColor: "#1a1a1a", borderColor: "#2a2a2a" }, children: /* @__PURE__ */ jsx("div", { className: "flex-1 flex flex-col items-center justify-center border-2 border-dashed border-white/5 rounded-xl" }) })
-          ] })
-        ] }),
-        tarjaPanelOpen && /* @__PURE__ */ jsxs(
-          "div",
-          {
-            className: "fixed z-[9999] border rounded-2xl shadow-2xl w-80 select-none",
-            style: { left: tarjaPanelPos.x, top: tarjaPanelPos.y, backgroundColor: "#1a1a1a", borderColor: "#3a3a3a" },
-            children: [
-              /* @__PURE__ */ jsxs(
-                "div",
-                {
-                  className: "flex items-center justify-between px-4 py-3 rounded-t-2xl cursor-grab active:cursor-grabbing border-b",
-                  style: { backgroundColor: "#252525", borderColor: "#333" },
-                  onMouseDown: (e) => {
-                    tarjaDragRef.current = { startX: e.clientX, startY: e.clientY, startPX: tarjaPanelPos.x, startPY: tarjaPanelPos.y };
-                    const onMove = (ev) => {
-                      if (!tarjaDragRef.current) return;
-                      setTarjaPanelPos({ x: tarjaDragRef.current.startPX + ev.clientX - tarjaDragRef.current.startX, y: tarjaDragRef.current.startPY + ev.clientY - tarjaDragRef.current.startY });
-                    };
-                    const onUp = () => {
-                      tarjaDragRef.current = null;
-                      window.removeEventListener("mousemove", onMove);
-                      window.removeEventListener("mouseup", onUp);
-                    };
-                    window.addEventListener("mousemove", onMove);
-                    window.addEventListener("mouseup", onUp);
-                  },
-                  children: [
-                    /* @__PURE__ */ jsx("span", { className: "text-[10px] font-black uppercase tracking-widest text-zinc-300", children: "🎞 Controles da Tarja" }),
-                    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-                      /* @__PURE__ */ jsx(
+                        key
+                      )) }),
+                      transitionType === "wipe" && /* @__PURE__ */ jsx("div", { className: "grid grid-cols-6 gap-0.5 mt-0.5", children: ["→", "←", "↓", "↑", "⬋", "⬊"].map((dir, i) => /* @__PURE__ */ jsx(
+                        "button",
+                        {
+                          onClick: () => setWipeDirIdx(i),
+                          className: "py-1 rounded text-[10px] font-black border transition-all",
+                          style: {
+                            backgroundColor: wipeDirIdx === i ? "#0ea5e9" : "#1a1a1a",
+                            borderColor: wipeDirIdx === i ? "#0ea5e9" : "#2a2a2a",
+                            color: wipeDirIdx === i ? "#fff" : "#52525b"
+                          },
+                          children: dir
+                        },
+                        i
+                      )) })
+                    ] }),
+                    /* @__PURE__ */ jsxs("div", { className: "flex gap-2 items-stretch mb-2", children: [
+                      /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center gap-0.5", children: [
+                        /* @__PURE__ */ jsx("span", { className: "text-[7px] font-black uppercase tracking-widest text-zinc-600", children: "PVW" }),
+                        /* @__PURE__ */ jsxs(
+                          "div",
+                          {
+                            className: "relative flex flex-col items-center select-none",
+                            style: { width: 48, height: 120, cursor: transitionType === "cut" ? "pointer" : "ns-resize" },
+                            title: transitionType === "cut" ? "Clique para CUT" : "Arraste — solte ≥95% para confirmar",
+                            onMouseDown: (e) => {
+                              if (transitionType === "cut") {
+                                handleTransition();
+                                handleTransComplete();
+                                return;
+                              }
+                              handleTransition();
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const onMove = (ev) => {
+                                const pct = Math.min(100, Math.max(0, (ev.clientY - rect.top) / rect.height * 100));
+                                setTransValue(Math.round(pct));
+                                applyTransOpacity(Math.round(pct), activePlayer);
+                              };
+                              const onUp = (ev) => {
+                                const pct = Math.min(100, Math.max(0, (ev.clientY - rect.top) / rect.height * 100));
+                                window.removeEventListener("mousemove", onMove);
+                                window.removeEventListener("mouseup", onUp);
+                                if (pct >= 95) {
+                                  handleTransComplete();
+                                } else {
+                                  setTransValue(0);
+                                  setPlayerAOpacity(activePlayer === "A" ? 1 : 0);
+                                  setPlayerAZ(activePlayer === "A" ? 10 : 0);
+                                  setPlayerBOpacity(activePlayer === "B" ? 1 : 0);
+                                  setPlayerBZ(activePlayer === "B" ? 10 : 0);
+                                  const inactiveEl = activePlayer === "A" ? pgmBRef.current : pgmARef.current;
+                                  if (inactiveEl) {
+                                    inactiveEl.pause();
+                                    inactiveEl.src = "";
+                                  }
+                                }
+                              };
+                              window.addEventListener("mousemove", onMove);
+                              window.addEventListener("mouseup", onUp);
+                            },
+                            children: [
+                              /* @__PURE__ */ jsx("div", { className: "absolute inset-x-0 rounded-lg", style: { top: 0, bottom: 0, background: "linear-gradient(90deg,#0d0d0d,#1c1c1c,#0d0d0d)", border: "2px solid #2a2a2a", boxShadow: "inset 0 2px 8px rgba(0,0,0,0.9)" } }),
+                              /* @__PURE__ */ jsx("div", { className: "absolute rounded-full", style: { left: "50%", transform: "translateX(-50%)", top: 8, bottom: 8, width: 4, background: "linear-gradient(180deg,#050505,#1e1e1e 50%,#050505)", boxShadow: "inset 0 1px 4px rgba(0,0,0,1)" } }),
+                              /* @__PURE__ */ jsx("div", { className: "absolute rounded-full transition-none", style: {
+                                left: "50%",
+                                transform: "translateX(-50%)",
+                                bottom: 8,
+                                width: 4,
+                                height: transValue > 0 ? `calc(${transValue}% - 8px)` : 0,
+                                background: transitionType === "dissolve" ? "linear-gradient(0deg,#7c3aed,#c4b5fd)" : transitionType === "wipe" ? "linear-gradient(0deg,#0284c7,#7dd3fc)" : "linear-gradient(0deg,#facc15,#fef08a)",
+                                boxShadow: transValue > 0 ? transitionType === "dissolve" ? "0 0 6px rgba(139,92,246,0.8)" : transitionType === "wipe" ? "0 0 6px rgba(14,165,233,0.8)" : "0 0 6px rgba(250,204,21,0.8)" : "none"
+                              } }),
+                              [25, 50, 75].map((t) => /* @__PURE__ */ jsx("div", { className: "absolute", style: { left: "50%", transform: "translateX(-50%)", top: `${t}%`, width: 14, height: 1, background: "rgba(255,255,255,0.07)" } }, t)),
+                              /* @__PURE__ */ jsxs("div", { className: "absolute z-10", style: {
+                                top: `calc(${transValue}% - 15px)`,
+                                left: "50%",
+                                transform: "translateX(-50%)",
+                                width: 40,
+                                height: 30,
+                                borderRadius: 5,
+                                background: "linear-gradient(180deg,#4a4a4a 0%,#d6d6d6 30%,#a0a0a0 50%,#6a6a6a 70%,#333 100%)",
+                                border: "1px solid #6a6a6a",
+                                boxShadow: "0 3px 10px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.25), inset 0 -1px 0 rgba(0,0,0,0.6)"
+                              }, children: [
+                                [0, 1, 2, 3].map((i) => /* @__PURE__ */ jsx("div", { className: "absolute", style: { top: `${9 + i * 3}px`, left: 5, right: 5, height: 1, background: "rgba(0,0,0,0.3)" } }, i)),
+                                /* @__PURE__ */ jsx("div", { className: "absolute", style: {
+                                  top: "50%",
+                                  left: 7,
+                                  right: 7,
+                                  height: 2,
+                                  transform: "translateY(-50%)",
+                                  borderRadius: 1,
+                                  background: transitionType === "dissolve" ? "#a78bfa" : transitionType === "wipe" ? "#7dd3fc" : "#facc15",
+                                  boxShadow: transitionType === "dissolve" ? "0 0 4px rgba(167,139,250,1)" : transitionType === "wipe" ? "0 0 4px rgba(125,211,252,1)" : "0 0 4px rgba(250,204,21,1)"
+                                } })
+                              ] })
+                            ]
+                          }
+                        ),
+                        /* @__PURE__ */ jsx("span", { className: "text-[7px] font-black uppercase tracking-widest text-zinc-600", children: "PGM" }),
+                        /* @__PURE__ */ jsx("span", { className: "text-[7px] font-mono text-center", style: { color: transValue > 0 ? "#facc15" : "#3f3f46" }, children: transValue > 0 ? transValue >= 95 ? "✓ OK" : `${transValue}%` : "—" })
+                      ] }),
+                      /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-1.5 flex-1", children: [
+                        /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-0.5", children: [
+                          /* @__PURE__ */ jsx("span", { className: "text-[7px] font-black uppercase tracking-widest text-zinc-600", children: "Duração Auto" }),
+                          /* @__PURE__ */ jsx("div", { className: "flex gap-1", children: [15, 30, 60, 90].map((f) => /* @__PURE__ */ jsx(
+                            "button",
+                            {
+                              onClick: () => setAutoTransDur(f),
+                              className: "flex-1 py-1 rounded text-[7px] font-black border transition-all",
+                              style: {
+                                backgroundColor: autoTransDur === f ? "#1d4ed8" : "#1a1a1a",
+                                borderColor: autoTransDur === f ? "#3b82f6" : "#2a2a2a",
+                                color: autoTransDur === f ? "#93c5fd" : "#52525b"
+                              },
+                              children: f === 15 ? "½s" : f === 30 ? "1s" : f === 60 ? "2s" : "3s"
+                            },
+                            f
+                          )) })
+                        ] }),
+                        /* @__PURE__ */ jsx(
+                          "button",
+                          {
+                            onClick: handleAutoTrans,
+                            disabled: autoTransRunning,
+                            className: "w-full py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all active:scale-[0.97] disabled:opacity-50",
+                            style: {
+                              background: autoTransRunning ? "linear-gradient(135deg,#1d4ed8,#2563eb)" : "linear-gradient(135deg,#1e3a8a,#1d4ed8)",
+                              borderColor: "#3b82f6",
+                              color: "#93c5fd",
+                              boxShadow: autoTransRunning ? "0 0 16px rgba(59,130,246,0.6)" : "0 0 8px rgba(59,130,246,0.2)"
+                            },
+                            children: autoTransRunning ? `⟳ ${transValue}%` : "▶ AUTO"
+                          }
+                        ),
+                        /* @__PURE__ */ jsx(
+                          "button",
+                          {
+                            onClick: () => {
+                              if (pgmChannelRef.current?.readyState === 1)
+                                pgmChannelRef.current.send(JSON.stringify({ type: "ftb" }));
+                              toast("⬛ Fade to Black");
+                            },
+                            className: "w-full py-1.5 rounded text-[8px] font-black uppercase tracking-widest border transition-all active:scale-[0.97]",
+                            style: { backgroundColor: "#0a0a0a", borderColor: "#3f3f46", color: "#71717a", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)" },
+                            children: "⬛ FTB"
+                          }
+                        ),
+                        /* @__PURE__ */ jsx(
+                          "button",
+                          {
+                            onClick: () => {
+                              const el = activePlayer === "A" ? pgmARef.current : pgmBRef.current;
+                              if (el) {
+                                el.paused ? el.play() : el.pause();
+                              }
+                              toast("🧊 FREEZE");
+                            },
+                            className: "w-full py-1.5 rounded text-[8px] font-black uppercase tracking-widest border transition-all active:scale-[0.97]",
+                            style: { backgroundColor: "#0c1a2e", borderColor: "#1e3a5f", color: "#60a5fa" },
+                            children: "🧊 FREEZE"
+                          }
+                        )
+                      ] })
+                    ] })
+                  ] }),
+                  /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-0 px-3 py-3 border-r overflow-y-auto", style: { borderColor: "#1e1e1e" }, children: [
+                    multiviewActive && /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-1.5 mb-3", children: [
+                      /* @__PURE__ */ jsx("div", { className: "flex items-center gap-1.5 mb-0.5", children: /* @__PURE__ */ jsx("span", { className: "text-[7px] font-black uppercase tracking-widest text-zinc-600 flex-1", children: "Bus de Câmeras" }) }),
+                      /* @__PURE__ */ jsx("div", { className: "grid grid-cols-5 gap-1 text-center", children: ["CAM 1", "CAM 2", "CAM 3", "CAM 4", "BLACK"].map((label) => /* @__PURE__ */ jsx("span", { className: "text-[6px] font-black uppercase text-zinc-700 truncate", children: label }, label)) }),
+                      /* @__PURE__ */ jsx("div", { className: "grid grid-cols-5 gap-1", children: ["cam1", "cam2", "cam3", "cam4", "black"].map((src, i) => /* @__PURE__ */ jsx(
                         "button",
                         {
                           onClick: () => {
-                            const next = !tarjaVisible;
-                            setTarjaVisible(next);
-                            pgmChannelRef.current?.readyState === 1 && pgmChannelRef.current.send(JSON.stringify({ type: next ? "tarja_show" : "tarja_hide" }));
+                            setPvwBus(src);
+                            if (src !== "black") {
+                              sendCamToPreview(i);
+                              toast.success(`PVW → ${src.toUpperCase()}`);
+                            }
                           },
-                          className: "text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded-lg border transition-all",
+                          className: "py-1.5 rounded text-[7px] font-black border transition-all active:scale-[0.97]",
                           style: {
-                            backgroundColor: tarjaVisible ? "#00E67620" : "#252525",
-                            borderColor: tarjaVisible ? "#00E67640" : "#3f3f46",
-                            color: tarjaVisible ? "#00E676" : "#71717a"
+                            backgroundColor: pvwBus === src ? "#1d4ed8" : "#1a1a1a",
+                            borderColor: pvwBus === src ? "#3b82f6" : "#2a2a2a",
+                            color: pvwBus === src ? "#fff" : "#52525b",
+                            boxShadow: pvwBus === src ? "0 0 6px rgba(59,130,246,0.5)" : "none"
                           },
-                          children: tarjaVisible ? "● ON" : "○ OFF"
-                        }
-                      ),
-                      /* @__PURE__ */ jsx("button", { onClick: () => setTarjaPanelOpen(false), className: "text-zinc-500 hover:text-red-400 font-bold transition-colors", children: "✕" })
-                    ] })
-                  ]
-                }
-              ),
-              /* @__PURE__ */ jsxs("div", { className: "p-4 flex flex-col gap-4 max-h-[80vh] overflow-y-auto", children: [
-                /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2", children: [
-                  /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "Caractere / Texto" }),
-                  /* @__PURE__ */ jsx(
-                    "input",
-                    {
-                      type: "text",
-                      value: tarjaText,
-                      onChange: (e) => setTarjaText(e.target.value),
-                      placeholder: "Nome da tarja...",
-                      className: "w-full border rounded-lg px-3 py-2 text-[11px] font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none transition-all",
-                      style: { backgroundColor: "#252525", borderColor: "#3a3a3a" }
-                    }
-                  ),
-                  /* @__PURE__ */ jsxs("div", { className: "flex gap-2 items-center", children: [
-                    /* @__PURE__ */ jsxs(
-                      "select",
-                      {
-                        value: tarjaFont,
-                        onChange: (e) => setTarjaFont(e.target.value),
-                        className: "flex-1 border rounded-lg px-2 py-1.5 text-[10px] text-zinc-200 focus:outline-none transition-all",
-                        style: { backgroundColor: "#252525", borderColor: "#3a3a3a" },
-                        children: [
-                          /* @__PURE__ */ jsx("option", { value: "sans-serif", children: "Sans-Serif" }),
-                          /* @__PURE__ */ jsx("option", { value: "serif", children: "Serif" }),
-                          /* @__PURE__ */ jsx("option", { value: "monospace", children: "Monospace" }),
-                          /* @__PURE__ */ jsx("option", { value: "Arial, sans-serif", children: "Arial" }),
-                          /* @__PURE__ */ jsx("option", { value: "'Times New Roman', serif", children: "Times New Roman" }),
-                          /* @__PURE__ */ jsx("option", { value: "'Courier New', monospace", children: "Courier New" }),
-                          /* @__PURE__ */ jsx("option", { value: "Georgia, serif", children: "Georgia" }),
-                          /* @__PURE__ */ jsx("option", { value: "Impact, sans-serif", children: "Impact" }),
-                          /* @__PURE__ */ jsx("option", { value: "Verdana, sans-serif", children: "Verdana" })
-                        ]
-                      }
-                    ),
-                    /* @__PURE__ */ jsx(
-                      "button",
-                      {
-                        onClick: () => setTarjaBold((v) => !v),
-                        className: "px-3 py-1.5 rounded-lg border text-[11px] font-black tracking-widest transition-all",
-                        style: { backgroundColor: tarjaBold ? "#00E67620" : "#252525", borderColor: tarjaBold ? "#00E67640" : "#3a3a3a", color: tarjaBold ? "#00E676" : "#71717a" },
-                        children: "B"
-                      }
-                    ),
-                    /* @__PURE__ */ jsx(
-                      "button",
-                      {
-                        onClick: () => setTarjaItalic((v) => !v),
-                        className: "px-3 py-1.5 rounded-lg border text-[11px] italic font-bold tracking-widest transition-all",
-                        style: { backgroundColor: tarjaItalic ? "#00E67620" : "#252525", borderColor: tarjaItalic ? "#00E67640" : "#3a3a3a", color: tarjaItalic ? "#00E676" : "#71717a" },
-                        children: "I"
-                      }
-                    )
+                          children: src === "black" ? "⬛" : `${i + 1}`
+                        },
+                        src
+                      )) }),
+                      /* @__PURE__ */ jsx("div", { className: "grid grid-cols-5 gap-1", children: ["cam1", "cam2", "cam3", "cam4", "black"].map((src, i) => /* @__PURE__ */ jsx(
+                        "button",
+                        {
+                          onClick: () => {
+                            setPgmBus(src);
+                            setActiveCam(src !== "black" ? i + 1 : null);
+                            if (src !== "black" && pgmChannelRef.current?.readyState === 1)
+                              pgmChannelRef.current.send(JSON.stringify({ type: "cam_take", cam: i + 1 }));
+                            toast.success(`PGM → ${src.toUpperCase()}`);
+                          },
+                          className: "py-1.5 rounded text-[7px] font-black border transition-all active:scale-[0.97]",
+                          style: {
+                            backgroundColor: pgmBus === src ? "#dc2626" : "#1a1a1a",
+                            borderColor: pgmBus === src ? "#ef4444" : "#2a2a2a",
+                            color: pgmBus === src ? "#fff" : "#52525b",
+                            boxShadow: pgmBus === src ? "0 0 8px rgba(220,38,38,0.6)" : "none"
+                          },
+                          children: src === "black" ? "⬛" : `${i + 1}`
+                        },
+                        src
+                      )) }),
+                      /* @__PURE__ */ jsxs("div", { className: "flex justify-between px-0.5", children: [
+                        /* @__PURE__ */ jsx("span", { className: "text-[6px] font-mono text-blue-500/60 uppercase", children: "PVW" }),
+                        /* @__PURE__ */ jsx("span", { className: "text-[6px] font-mono text-red-500/60 uppercase", children: "PGM" })
+                      ] })
+                    ] }),
+                    /* @__PURE__ */ jsx("div", { className: "border-t pt-3 mt-1", style: { borderColor: "#222" }, children: /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-1 mb-2", children: [
+                      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5", children: [
+                        /* @__PURE__ */ jsx("span", { className: "text-[8px] font-black uppercase tracking-widest text-zinc-500 flex-1", children: "DSK — Downstream Keyer" }),
+                        /* @__PURE__ */ jsx("span", { className: cn("text-[7px] font-black uppercase px-1.5 py-0.5 rounded border", dskActive ? "text-green-400 border-green-500/40 bg-green-500/10 animate-pulse" : "text-zinc-700 border-zinc-800 bg-zinc-900"), children: dskActive ? "ON AIR" : "OFF" })
+                      ] }),
+                      /* @__PURE__ */ jsxs("div", { className: "flex gap-1", children: [
+                        /* @__PURE__ */ jsx(
+                          "button",
+                          {
+                            onClick: () => dskFileInputRef.current?.click(),
+                            className: "flex-1 py-1.5 rounded text-[8px] font-black uppercase border transition-all",
+                            style: { backgroundColor: dskPng ? "#14532d30" : "#1a1a1a", borderColor: dskPng ? "#16a34a50" : "#2a2a2a", color: dskPng ? "#4ade80" : "#52525b" },
+                            children: dskPng ? "✓ PNG" : "🖼 LOAD"
+                          }
+                        ),
+                        /* @__PURE__ */ jsx("input", { ref: dskFileInputRef, type: "file", accept: "image/png", className: "hidden", onChange: (e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleDskLoad(f);
+                          e.target.value = "";
+                        } }),
+                        /* @__PURE__ */ jsx(
+                          "button",
+                          {
+                            onClick: () => {
+                              if (!dskPng) {
+                                toast.error("Carregue um PNG primeiro");
+                                return;
+                              }
+                              setDskActive((v) => !v);
+                              if (pgmChannelRef.current?.readyState === 1)
+                                pgmChannelRef.current.send(JSON.stringify({ type: dskActive ? "dsk_off" : "dsk_on", png: dskPng, opacity: dskOpacity }));
+                            },
+                            className: "flex-1 py-1.5 rounded text-[8px] font-black uppercase border transition-all active:scale-[0.97]",
+                            style: {
+                              backgroundColor: dskActive ? "#14532d" : "#1a1a1a",
+                              borderColor: dskActive ? "#22c55e" : "#3f3f46",
+                              color: dskActive ? "#4ade80" : "#71717a",
+                              boxShadow: dskActive ? "0 0 10px rgba(34,197,94,0.4)" : "none"
+                            },
+                            children: dskActive ? "▌▌ TAKE OFF" : "▶ TAKE ON"
+                          }
+                        ),
+                        dskPng && /* @__PURE__ */ jsx(
+                          "button",
+                          {
+                            onClick: () => {
+                              setDskPng(null);
+                              setDskActive(false);
+                            },
+                            className: "px-2 rounded border border-red-500/20 text-red-500/60 text-[10px] transition-all hover:border-red-500/60 hover:text-red-400",
+                            style: { backgroundColor: "#1a1a1a" },
+                            children: /* @__PURE__ */ jsx(X, { className: "h-3 w-3" })
+                          }
+                        )
+                      ] }),
+                      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+                        /* @__PURE__ */ jsx("span", { className: "text-[7px] font-black uppercase text-zinc-700 shrink-0", children: "Opacidade" }),
+                        /* @__PURE__ */ jsx(
+                          "input",
+                          {
+                            type: "range",
+                            min: 0,
+                            max: 100,
+                            value: dskOpacity,
+                            onChange: (e) => {
+                              const v = Number(e.target.value);
+                              setDskOpacity(v);
+                              if (pgmChannelRef.current?.readyState === 1) pgmChannelRef.current.send(JSON.stringify({ type: "dsk_opacity", opacity: v }));
+                            },
+                            className: "flex-1 h-1 accent-green-500 cursor-pointer"
+                          }
+                        ),
+                        /* @__PURE__ */ jsxs("span", { className: "text-[7px] font-mono text-zinc-600 shrink-0 w-6 text-right", children: [
+                          dskOpacity,
+                          "%"
+                        ] })
+                      ] })
+                    ] }) })
                   ] }),
-                  /* @__PURE__ */ jsx(
-                    "div",
-                    {
-                      className: "w-full px-3 py-2 rounded-lg border text-center truncate text-[13px]",
-                      style: { backgroundColor: "#0a0a0a", borderColor: "#2a2a2a", fontFamily: tarjaFont, fontWeight: tarjaBold ? "bold" : "normal", fontStyle: tarjaItalic ? "italic" : "normal", color: `hsl(${tarjaHue}, ${tarjaSaturation}%, 80%)` },
-                      children: tarjaText || "Prévia do texto"
-                    }
-                  )
-                ] }),
-                /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2", children: [
-                  /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "Cor da Tarja" }),
-                  /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-                    /* @__PURE__ */ jsx("label", { className: "text-[9px] text-zinc-500 w-16 shrink-0", children: "Hue" }),
-                    /* @__PURE__ */ jsx(
-                      "input",
-                      {
-                        type: "range",
-                        min: 0,
-                        max: 360,
-                        value: tarjaHue,
-                        onChange: (e) => setTarjaHue(Number(e.target.value)),
-                        className: "flex-1 h-1.5 accent-pink-500",
-                        style: { background: `linear-gradient(to right,hsl(0,100%,50%),hsl(60,100%,50%),hsl(120,100%,50%),hsl(180,100%,50%),hsl(240,100%,50%),hsl(300,100%,50%),hsl(360,100%,50%))` }
-                      }
-                    ),
-                    /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
-                      tarjaHue,
-                      "°"
-                    ] })
-                  ] }),
-                  /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-                    /* @__PURE__ */ jsx("label", { className: "text-[9px] text-zinc-500 w-16 shrink-0", children: "Saturação" }),
-                    /* @__PURE__ */ jsx(
-                      "input",
-                      {
-                        type: "range",
-                        min: 0,
-                        max: 100,
-                        value: tarjaSaturation,
-                        onChange: (e) => setTarjaSaturation(Number(e.target.value)),
-                        className: "flex-1 h-1.5 accent-pink-500"
-                      }
-                    ),
-                    /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
-                      tarjaSaturation,
-                      "%"
-                    ] })
-                  ] }),
-                  /* @__PURE__ */ jsx(
-                    "div",
-                    {
-                      className: "w-full h-5 rounded-md border border-zinc-700",
-                      style: { backgroundColor: `hsla(${tarjaHue},${tarjaSaturation}%,40%,${tarjaAlpha / 100})` }
-                    }
-                  )
-                ] }),
-                /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2", children: [
-                  /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "Opacidade (Alpha)" }),
-                  /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-                    /* @__PURE__ */ jsx(
-                      "input",
-                      {
-                        type: "range",
-                        min: 0,
-                        max: 100,
-                        value: tarjaAlpha,
-                        onChange: (e) => setTarjaAlpha(Number(e.target.value)),
-                        className: "flex-1 h-1.5 accent-pink-500"
-                      }
-                    ),
-                    /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
-                      tarjaAlpha,
-                      "%"
+                  /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-0 px-3 py-3 overflow-y-auto", children: [
+                    /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-1.5 mb-2", children: [
+                      /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "🖼 Frames & Overlay" }),
+                      /* @__PURE__ */ jsx("div", { className: "grid grid-cols-4 gap-2", children: [0, 1, 2, 3, 4, 5, 6, 7].map((id) => {
+                        const realId = id % 4;
+                        return /* @__PURE__ */ jsxs(
+                          "button",
+                          {
+                            onClick: () => {
+                              if (id < 4) handleMeFrameClick(id);
+                              else meFileInputRefs.current[realId]?.click();
+                            },
+                            className: cn(
+                              "aspect-square bg-[#0d0d0d] border-2 rounded-md flex flex-col items-center justify-center transition-all group overflow-hidden relative",
+                              id < 4 ? meActiveFrame === id ? "border-[#00E676] shadow-[0_0_8px_rgba(0,230,118,0.5)]" : "border-[#222] hover:border-[#00E67660]" : "border-[#1e1e1e] hover:border-[#3f3f46]"
+                            ),
+                            title: id < 4 ? meFrames[id] ? `FRAME ${id + 1} — clique para ativar/desativar` : `F${id + 1}: Carregar PNG` : `Slot extra ${id + 1}`,
+                            children: [
+                              id < 4 && meFrames[id] ? /* @__PURE__ */ jsxs(Fragment, { children: [
+                                /* @__PURE__ */ jsx("img", { src: meFrames[id], alt: "", className: "absolute inset-0 w-full h-full object-contain p-0.5" }),
+                                /* @__PURE__ */ jsx(
+                                  "button",
+                                  {
+                                    onClick: (e) => handleMeFrameClear(id, e),
+                                    className: "absolute top-0 right-0 z-20 flex items-center justify-center w-3.5 h-3.5 rounded-bl bg-black/80 text-zinc-500 hover:text-red-400 transition-all",
+                                    children: /* @__PURE__ */ jsx(X, { className: "h-2 w-2" })
+                                  }
+                                )
+                              ] }) : /* @__PURE__ */ jsx(Image, { className: "text-zinc-800 group-hover:text-zinc-600 transition-colors", size: 16 }),
+                              /* @__PURE__ */ jsx("span", { className: cn(
+                                "text-[8px] z-10 font-black",
+                                id < 4 && meActiveFrame === id ? "text-[#00E676] bg-black/70 px-0.5 rounded" : "text-zinc-700"
+                              ), children: id < 4 ? `F${id + 1}` : `S${id - 3}` }),
+                              id < 4 && /* @__PURE__ */ jsx(
+                                "input",
+                                {
+                                  ref: (el) => {
+                                    meFileInputRefs.current[id] = el;
+                                  },
+                                  type: "file",
+                                  accept: "image/png",
+                                  className: "hidden",
+                                  onChange: (e) => {
+                                    const f = e.target.files?.[0];
+                                    if (f) handleMeFrameLoad(id, f);
+                                    e.target.value = "";
+                                  }
+                                }
+                              )
+                            ]
+                          },
+                          id
+                        );
+                      }) })
+                    ] }),
+                    /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-1.5 mt-3 pt-3 border-t", style: { borderColor: "#222" }, children: [
+                      /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "Status" }),
+                      /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-1.5", children: [
+                        /* @__PURE__ */ jsxs("div", { className: "rounded-lg border px-2 py-1.5 flex flex-col gap-0.5", style: { backgroundColor: "#0a0a0a", borderColor: "#222" }, children: [
+                          /* @__PURE__ */ jsx("span", { className: "text-[7px] font-black uppercase text-zinc-600", children: "Transição" }),
+                          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-black uppercase", style: { color: transitionType === "dissolve" ? "#a78bfa" : transitionType === "wipe" ? "#7dd3fc" : "#facc15" }, children: transitionType === "dissolve" ? "MIX" : transitionType === "wipe" ? "WIPE" : "CUT" })
+                        ] }),
+                        /* @__PURE__ */ jsxs("div", { className: "rounded-lg border px-2 py-1.5 flex flex-col gap-0.5", style: { backgroundColor: "#0a0a0a", borderColor: "#222" }, children: [
+                          /* @__PURE__ */ jsx("span", { className: "text-[7px] font-black uppercase text-zinc-600", children: "DSK" }),
+                          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-black uppercase", style: { color: dskActive ? "#4ade80" : "#52525b" }, children: dskActive ? "ON AIR" : "OFF" })
+                        ] })
+                      ] })
                     ] })
                   ] })
-                ] }),
-                /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2", children: [
-                  /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between", children: [
-                    /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "Escala" }),
-                    /* @__PURE__ */ jsx(
-                      "button",
-                      {
-                        onClick: () => setTarjaScaleLock((v) => !v),
-                        className: "flex items-center gap-1 px-2 py-1 rounded-lg border text-[9px] font-bold uppercase tracking-widest transition-all",
-                        style: {
-                          backgroundColor: tarjaScaleLock ? "#00E67620" : "#252525",
-                          borderColor: tarjaScaleLock ? "#00E67450" : "#3f3f46",
-                          color: tarjaScaleLock ? "#00E676" : "#71717a"
-                        },
-                        children: tarjaScaleLock ? "🔒 LOCK" : "🔓 FREE"
-                      }
-                    )
-                  ] }),
-                  /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-                    /* @__PURE__ */ jsx("label", { className: "text-[9px] text-zinc-500 w-16 shrink-0", children: "Largura X" }),
-                    /* @__PURE__ */ jsx(
-                      "input",
-                      {
-                        type: "range",
-                        min: 10,
-                        max: 400,
-                        value: tarjaScaleX,
-                        onChange: (e) => {
-                          const v = Number(e.target.value);
-                          if (tarjaScaleLock) {
-                            setTarjaScaleX(v);
-                            setTarjaScaleY(v);
-                          } else setTarjaScaleX(v);
-                        },
-                        className: "flex-1 h-1.5 accent-pink-500"
-                      }
-                    ),
-                    /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
-                      tarjaScaleX,
-                      "%"
-                    ] })
-                  ] }),
-                  /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-                    /* @__PURE__ */ jsx("label", { className: "text-[9px] text-zinc-500 w-16 shrink-0", children: "Altura Y" }),
-                    /* @__PURE__ */ jsx(
-                      "input",
-                      {
-                        type: "range",
-                        min: 10,
-                        max: 400,
-                        value: tarjaScaleY,
-                        onChange: (e) => {
-                          const v = Number(e.target.value);
-                          if (tarjaScaleLock) {
-                            setTarjaScaleX(v);
-                            setTarjaScaleY(v);
-                          } else setTarjaScaleY(v);
-                        },
-                        className: "flex-1 h-1.5 accent-pink-500"
-                      }
-                    ),
-                    /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
-                      tarjaScaleY,
-                      "%"
-                    ] })
-                  ] })
-                ] }),
-                /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2", children: [
-                  /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "Posição na Tela" }),
-                  /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-                    /* @__PURE__ */ jsx("label", { className: "text-[9px] text-zinc-500 w-16 shrink-0", children: "X (horiz.)" }),
-                    /* @__PURE__ */ jsx(
-                      "input",
-                      {
-                        type: "range",
-                        min: 0,
-                        max: 100,
-                        value: tarjaX,
-                        onChange: (e) => setTarjaX(Number(e.target.value)),
-                        className: "flex-1 h-1.5 accent-pink-500"
-                      }
-                    ),
-                    /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
-                      tarjaX,
-                      "%"
-                    ] })
-                  ] }),
-                  /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-                    /* @__PURE__ */ jsx("label", { className: "text-[9px] text-zinc-500 w-16 shrink-0", children: "Y (vert.)" }),
-                    /* @__PURE__ */ jsx(
-                      "input",
-                      {
-                        type: "range",
-                        min: 0,
-                        max: 100,
-                        value: tarjaY,
-                        onChange: (e) => setTarjaY(Number(e.target.value)),
-                        className: "flex-1 h-1.5 accent-pink-500"
-                      }
-                    ),
-                    /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
-                      tarjaY,
-                      "%"
-                    ] })
-                  ] }),
-                  /* @__PURE__ */ jsx("div", { className: "relative w-full h-14 rounded-lg border border-zinc-700 overflow-hidden", style: { backgroundColor: "#252525" }, children: /* @__PURE__ */ jsx(
-                    "div",
-                    {
-                      className: "absolute w-2.5 h-2.5 rounded-full border-2 border-white -translate-x-1/2 -translate-y-1/2 shadow-lg transition-all duration-75",
-                      style: { left: `${tarjaX}%`, top: `${tarjaY}%`, backgroundColor: `hsla(${tarjaHue},${tarjaSaturation}%,50%,0.8)` }
-                    }
-                  ) })
-                ] }),
-                /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2 border-t border-zinc-700 pt-3", children: [
-                  /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "PNG Personalizado" }),
-                  /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
-                    /* @__PURE__ */ jsx(
-                      "button",
-                      {
-                        onClick: () => tarjaFileInputRef.current?.click(),
-                        className: "flex-1 px-3 py-2 rounded-xl border text-[9px] font-bold uppercase tracking-widest text-zinc-200 transition-all active:scale-95",
-                        style: { backgroundColor: "#2a2a2a", borderColor: "#3a3a3a" },
-                        children: "📁 PERSONALIZAR"
-                      }
-                    ),
-                    tarjaCustomPng && /* @__PURE__ */ jsx(
-                      "button",
-                      {
-                        onClick: () => setTarjaCustomPng(null),
-                        className: "px-3 py-2 rounded-xl border border-red-500/30 text-[9px] font-bold text-red-400 transition-all active:scale-95",
-                        style: { backgroundColor: "#7f1d1d40" },
-                        children: "✕ Remover"
-                      }
-                    )
-                  ] }),
-                  tarjaCustomPng && /* @__PURE__ */ jsx(
-                    "div",
-                    {
-                      className: "w-full overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 flex items-center justify-center",
-                      style: { aspectRatio: `${tarjaScaleX} / ${tarjaScaleY}` },
-                      children: /* @__PURE__ */ jsx("img", { src: tarjaCustomPng, alt: "Tarja custom", className: "w-full h-full object-contain" })
-                    }
-                  ),
-                  /* @__PURE__ */ jsx(
-                    "input",
-                    {
-                      ref: tarjaFileInputRef,
-                      type: "file",
-                      accept: "image/png",
-                      className: "hidden",
-                      onChange: (e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = () => setTarjaCustomPng(reader.result);
-                        reader.readAsDataURL(file);
-                        e.target.value = "";
-                      }
-                    }
-                  )
                 ] })
+              ]
+            }
+          )
+        ] })
+      ] }),
+      tarjaPanelOpen && /* @__PURE__ */ jsxs(
+        "div",
+        {
+          className: "fixed z-[9999] border rounded-2xl shadow-2xl w-80 select-none",
+          style: { left: tarjaPanelPos.x, top: tarjaPanelPos.y, backgroundColor: "#1a1a1a", borderColor: "#3a3a3a" },
+          children: [
+            /* @__PURE__ */ jsxs(
+              "div",
+              {
+                className: "flex items-center justify-between px-4 py-3 rounded-t-2xl cursor-grab active:cursor-grabbing border-b",
+                style: { backgroundColor: "#252525", borderColor: "#333" },
+                onMouseDown: (e) => {
+                  tarjaDragRef.current = { startX: e.clientX, startY: e.clientY, startPX: tarjaPanelPos.x, startPY: tarjaPanelPos.y };
+                  const onMove = (ev) => {
+                    if (!tarjaDragRef.current) return;
+                    setTarjaPanelPos({ x: tarjaDragRef.current.startPX + ev.clientX - tarjaDragRef.current.startX, y: tarjaDragRef.current.startPY + ev.clientY - tarjaDragRef.current.startY });
+                  };
+                  const onUp = () => {
+                    tarjaDragRef.current = null;
+                    window.removeEventListener("mousemove", onMove);
+                    window.removeEventListener("mouseup", onUp);
+                  };
+                  window.addEventListener("mousemove", onMove);
+                  window.addEventListener("mouseup", onUp);
+                },
+                children: [
+                  /* @__PURE__ */ jsx("span", { className: "text-[10px] font-black uppercase tracking-widest text-zinc-300", children: "🎞 Controles da Tarja" }),
+                  /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+                    /* @__PURE__ */ jsx(
+                      "button",
+                      {
+                        onClick: () => {
+                          const next = !tarjaVisible;
+                          setTarjaVisible(next);
+                          pgmChannelRef.current?.readyState === 1 && pgmChannelRef.current.send(JSON.stringify({ type: next ? "tarja_show" : "tarja_hide" }));
+                        },
+                        className: "text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded-lg border transition-all",
+                        style: {
+                          backgroundColor: tarjaVisible ? "#00E67620" : "#252525",
+                          borderColor: tarjaVisible ? "#00E67640" : "#3f3f46",
+                          color: tarjaVisible ? "#00E676" : "#71717a"
+                        },
+                        children: tarjaVisible ? "● ON" : "○ OFF"
+                      }
+                    ),
+                    /* @__PURE__ */ jsx("button", { onClick: () => setTarjaPanelOpen(false), className: "text-zinc-500 hover:text-red-400 font-bold transition-colors", children: "✕" })
+                  ] })
+                ]
+              }
+            ),
+            /* @__PURE__ */ jsxs("div", { className: "p-4 flex flex-col gap-4 max-h-[80vh] overflow-y-auto", children: [
+              /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2", children: [
+                /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "Caractere / Texto" }),
+                /* @__PURE__ */ jsx(
+                  "input",
+                  {
+                    type: "text",
+                    value: tarjaText,
+                    onChange: (e) => setTarjaText(e.target.value),
+                    placeholder: "Nome da tarja...",
+                    className: "w-full border rounded-lg px-3 py-2 text-[11px] font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none transition-all",
+                    style: { backgroundColor: "#252525", borderColor: "#3a3a3a" }
+                  }
+                ),
+                /* @__PURE__ */ jsxs("div", { className: "flex gap-2 items-center", children: [
+                  /* @__PURE__ */ jsxs(
+                    "select",
+                    {
+                      value: tarjaFont,
+                      onChange: (e) => setTarjaFont(e.target.value),
+                      className: "flex-1 border rounded-lg px-2 py-1.5 text-[10px] text-zinc-200 focus:outline-none transition-all",
+                      style: { backgroundColor: "#252525", borderColor: "#3a3a3a" },
+                      children: [
+                        /* @__PURE__ */ jsx("option", { value: "sans-serif", children: "Sans-Serif" }),
+                        /* @__PURE__ */ jsx("option", { value: "serif", children: "Serif" }),
+                        /* @__PURE__ */ jsx("option", { value: "monospace", children: "Monospace" }),
+                        /* @__PURE__ */ jsx("option", { value: "Arial, sans-serif", children: "Arial" }),
+                        /* @__PURE__ */ jsx("option", { value: "'Times New Roman', serif", children: "Times New Roman" }),
+                        /* @__PURE__ */ jsx("option", { value: "'Courier New', monospace", children: "Courier New" }),
+                        /* @__PURE__ */ jsx("option", { value: "Georgia, serif", children: "Georgia" }),
+                        /* @__PURE__ */ jsx("option", { value: "Impact, sans-serif", children: "Impact" }),
+                        /* @__PURE__ */ jsx("option", { value: "Verdana, sans-serif", children: "Verdana" })
+                      ]
+                    }
+                  ),
+                  /* @__PURE__ */ jsx(
+                    "button",
+                    {
+                      onClick: () => setTarjaBold((v) => !v),
+                      className: "px-3 py-1.5 rounded-lg border text-[11px] font-black tracking-widest transition-all",
+                      style: { backgroundColor: tarjaBold ? "#00E67620" : "#252525", borderColor: tarjaBold ? "#00E67640" : "#3a3a3a", color: tarjaBold ? "#00E676" : "#71717a" },
+                      children: "B"
+                    }
+                  ),
+                  /* @__PURE__ */ jsx(
+                    "button",
+                    {
+                      onClick: () => setTarjaItalic((v) => !v),
+                      className: "px-3 py-1.5 rounded-lg border text-[11px] italic font-bold tracking-widest transition-all",
+                      style: { backgroundColor: tarjaItalic ? "#00E67620" : "#252525", borderColor: tarjaItalic ? "#00E67640" : "#3a3a3a", color: tarjaItalic ? "#00E676" : "#71717a" },
+                      children: "I"
+                    }
+                  )
+                ] }),
+                /* @__PURE__ */ jsx(
+                  "div",
+                  {
+                    className: "w-full px-3 py-2 rounded-lg border text-center truncate text-[13px]",
+                    style: { backgroundColor: "#0a0a0a", borderColor: "#2a2a2a", fontFamily: tarjaFont, fontWeight: tarjaBold ? "bold" : "normal", fontStyle: tarjaItalic ? "italic" : "normal", color: `hsl(${tarjaHue}, ${tarjaSaturation}%, 80%)` },
+                    children: tarjaText || "Prévia do texto"
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2", children: [
+                /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "Cor da Tarja" }),
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+                  /* @__PURE__ */ jsx("label", { className: "text-[9px] text-zinc-500 w-16 shrink-0", children: "Hue" }),
+                  /* @__PURE__ */ jsx(
+                    "input",
+                    {
+                      type: "range",
+                      min: 0,
+                      max: 360,
+                      value: tarjaHue,
+                      onChange: (e) => setTarjaHue(Number(e.target.value)),
+                      className: "flex-1 h-1.5 accent-pink-500",
+                      style: { background: `linear-gradient(to right,hsl(0,100%,50%),hsl(60,100%,50%),hsl(120,100%,50%),hsl(180,100%,50%),hsl(240,100%,50%),hsl(300,100%,50%),hsl(360,100%,50%))` }
+                    }
+                  ),
+                  /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
+                    tarjaHue,
+                    "°"
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+                  /* @__PURE__ */ jsx("label", { className: "text-[9px] text-zinc-500 w-16 shrink-0", children: "Saturação" }),
+                  /* @__PURE__ */ jsx(
+                    "input",
+                    {
+                      type: "range",
+                      min: 0,
+                      max: 100,
+                      value: tarjaSaturation,
+                      onChange: (e) => setTarjaSaturation(Number(e.target.value)),
+                      className: "flex-1 h-1.5 accent-pink-500"
+                    }
+                  ),
+                  /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
+                    tarjaSaturation,
+                    "%"
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsx(
+                  "div",
+                  {
+                    className: "w-full h-5 rounded-md border border-zinc-700",
+                    style: { backgroundColor: `hsla(${tarjaHue},${tarjaSaturation}%,40%,${tarjaAlpha / 100})` }
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2", children: [
+                /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "Opacidade (Alpha)" }),
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+                  /* @__PURE__ */ jsx(
+                    "input",
+                    {
+                      type: "range",
+                      min: 0,
+                      max: 100,
+                      value: tarjaAlpha,
+                      onChange: (e) => setTarjaAlpha(Number(e.target.value)),
+                      className: "flex-1 h-1.5 accent-pink-500"
+                    }
+                  ),
+                  /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
+                    tarjaAlpha,
+                    "%"
+                  ] })
+                ] })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2", children: [
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between", children: [
+                  /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "Escala" }),
+                  /* @__PURE__ */ jsx(
+                    "button",
+                    {
+                      onClick: () => setTarjaScaleLock((v) => !v),
+                      className: "flex items-center gap-1 px-2 py-1 rounded-lg border text-[9px] font-bold uppercase tracking-widest transition-all",
+                      style: {
+                        backgroundColor: tarjaScaleLock ? "#00E67620" : "#252525",
+                        borderColor: tarjaScaleLock ? "#00E67450" : "#3f3f46",
+                        color: tarjaScaleLock ? "#00E676" : "#71717a"
+                      },
+                      children: tarjaScaleLock ? "🔒 LOCK" : "🔓 FREE"
+                    }
+                  )
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+                  /* @__PURE__ */ jsx("label", { className: "text-[9px] text-zinc-500 w-16 shrink-0", children: "Largura X" }),
+                  /* @__PURE__ */ jsx(
+                    "input",
+                    {
+                      type: "range",
+                      min: 10,
+                      max: 400,
+                      value: tarjaScaleX,
+                      onChange: (e) => {
+                        const v = Number(e.target.value);
+                        if (tarjaScaleLock) {
+                          setTarjaScaleX(v);
+                          setTarjaScaleY(v);
+                        } else setTarjaScaleX(v);
+                      },
+                      className: "flex-1 h-1.5 accent-pink-500"
+                    }
+                  ),
+                  /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
+                    tarjaScaleX,
+                    "%"
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+                  /* @__PURE__ */ jsx("label", { className: "text-[9px] text-zinc-500 w-16 shrink-0", children: "Altura Y" }),
+                  /* @__PURE__ */ jsx(
+                    "input",
+                    {
+                      type: "range",
+                      min: 10,
+                      max: 400,
+                      value: tarjaScaleY,
+                      onChange: (e) => {
+                        const v = Number(e.target.value);
+                        if (tarjaScaleLock) {
+                          setTarjaScaleX(v);
+                          setTarjaScaleY(v);
+                        } else setTarjaScaleY(v);
+                      },
+                      className: "flex-1 h-1.5 accent-pink-500"
+                    }
+                  ),
+                  /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
+                    tarjaScaleY,
+                    "%"
+                  ] })
+                ] })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2", children: [
+                /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "Posição na Tela" }),
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+                  /* @__PURE__ */ jsx("label", { className: "text-[9px] text-zinc-500 w-16 shrink-0", children: "X (horiz.)" }),
+                  /* @__PURE__ */ jsx(
+                    "input",
+                    {
+                      type: "range",
+                      min: 0,
+                      max: 100,
+                      value: tarjaX,
+                      onChange: (e) => setTarjaX(Number(e.target.value)),
+                      className: "flex-1 h-1.5 accent-pink-500"
+                    }
+                  ),
+                  /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
+                    tarjaX,
+                    "%"
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+                  /* @__PURE__ */ jsx("label", { className: "text-[9px] text-zinc-500 w-16 shrink-0", children: "Y (vert.)" }),
+                  /* @__PURE__ */ jsx(
+                    "input",
+                    {
+                      type: "range",
+                      min: 0,
+                      max: 100,
+                      value: tarjaY,
+                      onChange: (e) => setTarjaY(Number(e.target.value)),
+                      className: "flex-1 h-1.5 accent-pink-500"
+                    }
+                  ),
+                  /* @__PURE__ */ jsxs("span", { className: "text-[9px] font-mono text-zinc-400 w-8 text-right", children: [
+                    tarjaY,
+                    "%"
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsx("div", { className: "relative w-full h-14 rounded-lg border border-zinc-700 overflow-hidden", style: { backgroundColor: "#252525" }, children: /* @__PURE__ */ jsx(
+                  "div",
+                  {
+                    className: "absolute w-2.5 h-2.5 rounded-full border-2 border-white -translate-x-1/2 -translate-y-1/2 shadow-lg transition-all duration-75",
+                    style: { left: `${tarjaX}%`, top: `${tarjaY}%`, backgroundColor: `hsla(${tarjaHue},${tarjaSaturation}%,50%,0.8)` }
+                  }
+                ) })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2 border-t border-zinc-700 pt-3", children: [
+                /* @__PURE__ */ jsx("span", { className: "text-[9px] font-black uppercase tracking-widest text-zinc-500", children: "PNG Personalizado" }),
+                /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
+                  /* @__PURE__ */ jsx(
+                    "button",
+                    {
+                      onClick: () => tarjaFileInputRef.current?.click(),
+                      className: "flex-1 px-3 py-2 rounded-xl border text-[9px] font-bold uppercase tracking-widest text-zinc-200 transition-all active:scale-95",
+                      style: { backgroundColor: "#2a2a2a", borderColor: "#3a3a3a" },
+                      children: "📁 PERSONALIZAR"
+                    }
+                  ),
+                  tarjaCustomPng && /* @__PURE__ */ jsx(
+                    "button",
+                    {
+                      onClick: () => setTarjaCustomPng(null),
+                      className: "px-3 py-2 rounded-xl border border-red-500/30 text-[9px] font-bold text-red-400 transition-all active:scale-95",
+                      style: { backgroundColor: "#7f1d1d40" },
+                      children: "✕ Remover"
+                    }
+                  )
+                ] }),
+                tarjaCustomPng && /* @__PURE__ */ jsx(
+                  "div",
+                  {
+                    className: "w-full overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 flex items-center justify-center",
+                    style: { aspectRatio: `${tarjaScaleX} / ${tarjaScaleY}` },
+                    children: /* @__PURE__ */ jsx("img", { src: tarjaCustomPng, alt: "Tarja custom", className: "w-full h-full object-contain" })
+                  }
+                ),
+                /* @__PURE__ */ jsx(
+                  "input",
+                  {
+                    ref: tarjaFileInputRef,
+                    type: "file",
+                    accept: "image/png",
+                    className: "hidden",
+                    onChange: (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => setTarjaCustomPng(reader.result);
+                      reader.readAsDataURL(file);
+                      e.target.value = "";
+                    }
+                  }
+                )
               ] })
-            ]
-          }
-        )
-      ] })
+            ] })
+          ]
+        }
+      )
     ] }),
     /* @__PURE__ */ jsx(
       "style",
@@ -8621,26 +9009,6 @@ function PlayoutPage() {
         }
       `
         }
-      }
-    ),
-    gcPanelOpen && /* @__PURE__ */ jsx(
-      GcPanel,
-      {
-        open: gcPanelOpen,
-        onClose: () => setGcPanelOpen(false),
-        gcLine1,
-        setGcLine1,
-        gcLine2,
-        setGcLine2,
-        gcDuration,
-        setGcDuration,
-        gcVisible,
-        setGcVisible,
-        gcCreditsQueue,
-        setGcCreditsQueue,
-        onTake: handleGcTakeQueue,
-        onClear: handleGcClear,
-        onSkip: handleGcSkip
       }
     )
   ] });
@@ -10966,7 +11334,34 @@ function EspelhoPage() {
         /* @__PURE__ */ jsx("div", { className: "flex items-center justify-center h-10 w-10 rounded-md bg-[#22c55e]/10 border border-[#22c55e]/40 shrink-0", children: /* @__PURE__ */ jsx(MonitorPlay, { className: "h-5 w-5 text-[#22c55e]" }) }),
         /* @__PURE__ */ jsx("h1", { className: "text-3xl sm:text-4xl font-black tracking-tight font-mono uppercase text-white", children: "ESPELHO" }),
         /* @__PURE__ */ jsx("span", { className: "text-[11px] font-mono uppercase tracking-widest text-[#6b7280] hidden sm:inline", children: "Exibição · Controle de Tempo" }),
-        /* @__PURE__ */ jsx("div", { className: "ml-auto flex items-center gap-2" })
+        /* @__PURE__ */ jsxs("div", { className: "ml-auto flex items-center gap-2", children: [
+          /* @__PURE__ */ jsxs(
+            "a",
+            {
+              href: `/tp?date=${date}&programa=${encodeURIComponent(programa ?? "")}`,
+              target: "_blank",
+              rel: "noopener noreferrer",
+              className: "inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-white text-[11px] font-semibold uppercase tracking-wider hover:border-[#22c55e] hover:ring-4 hover:ring-[#22c55e]/10 transition-all duration-300 shadow-md active:scale-[0.98]",
+              children: [
+                /* @__PURE__ */ jsx(Tv, { className: "h-3.5 w-3.5 text-white" }),
+                " TP"
+              ]
+            }
+          ),
+          /* @__PURE__ */ jsxs(
+            "a",
+            {
+              href: `/playout?date=${date}&programa=${encodeURIComponent(programa ?? "")}`,
+              target: "_blank",
+              rel: "noopener noreferrer",
+              className: "inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-white text-[11px] font-semibold uppercase tracking-wider hover:border-[#22c55e] hover:ring-4 hover:ring-[#22c55e]/10 transition-all duration-300 shadow-md active:scale-[0.98]",
+              children: [
+                /* @__PURE__ */ jsx(Tv, { className: "h-3.5 w-3.5 text-white" }),
+                " PLAYOUT"
+              ]
+            }
+          )
+        ] })
       ] })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "flex items-center justify-between mb-6 flex-wrap gap-3", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 sm:gap-3 flex-wrap", children: [
@@ -10990,14 +11385,14 @@ function EspelhoPage() {
             } catch {
             }
           },
-          className: "px-4 py-3.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-body-sm font-bold text-[#ffffff] focus:outline-none focus:border-[#22c55e] focus:ring-4 focus:ring-[#22c55e]/10 transition-all duration-300 appearance-none cursor-pointer",
+          className: "w-[220px] px-4 py-3.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-body-sm font-bold text-[#ffffff] focus:outline-none focus:border-[#22c55e] focus:ring-4 focus:ring-[#22c55e]/10 transition-all duration-300 appearance-none cursor-pointer",
           children: [
             /* @__PURE__ */ jsx("option", { value: "Todos", children: "Todos os programas" }),
             PROGRAMAS.map((p) => /* @__PURE__ */ jsx("option", { value: p, className: "bg-[#141416] text-[#ffffff]", children: p }, p))
           ]
         }
       ),
-      /* @__PURE__ */ jsxs("div", { className: "font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-8 py-4 bg-[#141416] backdrop-blur-xl shadow-xl flex flex-col items-center justify-center min-w-[160px]", children: [
+      /* @__PURE__ */ jsxs("div", { className: "font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-6 py-2 bg-[#141416] backdrop-blur-xl shadow-xl flex flex-col items-center justify-center min-w-[160px]", children: [
         /* @__PURE__ */ jsx("span", { className: "text-[#6b7280] text-label mb-1 font-black", children: "PRODUÇÃO" }),
         /* @__PURE__ */ jsx(
           "input",
@@ -11021,7 +11416,7 @@ function EspelhoPage() {
           }
         )
       ] }),
-      /* @__PURE__ */ jsxs("div", { className: "font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-8 py-4 bg-[#141416] backdrop-blur-xl shadow-xl flex flex-col items-center justify-center min-w-[160px]", children: [
+      /* @__PURE__ */ jsxs("div", { className: "font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-6 py-2 bg-[#141416] backdrop-blur-xl shadow-xl flex flex-col items-center justify-center min-w-[160px]", children: [
         /* @__PURE__ */ jsx("span", { className: "text-[#6b7280] text-label mb-1 font-black", children: "MASTER" }),
         /* @__PURE__ */ jsx(
           "input",
@@ -11046,13 +11441,13 @@ function EspelhoPage() {
         )
       ] }),
       diffEditorial.type !== "balanceado" && /* @__PURE__ */ jsxs("div", { className: cn(
-        "font-mono text-display-lg border rounded-lg px-8 py-4 flex flex-col items-center justify-center min-w-[160px] shadow-xl",
+        "font-mono text-display-lg border rounded-lg px-6 py-2 flex flex-col items-center justify-center min-w-[160px] shadow-xl",
         diffEditorial.type === "estouro" ? "bg-[#ef4444]/10 text-[#ef4444] border-[#ef4444]/30" : "bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/30"
       ), children: [
         /* @__PURE__ */ jsx("span", { className: "text-label mb-1 font-black", children: diffEditorial.type === "estouro" ? "Estouro" : "Sobra" }),
         /* @__PURE__ */ jsx("span", { className: "font-bold text-h2 tabular-nums", children: formatSecondsToTime(diffEditorial.value) })
       ] }),
-      /* @__PURE__ */ jsxs("div", { className: "font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-8 py-4 bg-[#141416] backdrop-blur-xl flex flex-col items-center justify-center min-w-[160px] shadow-2xl", children: [
+      /* @__PURE__ */ jsxs("div", { className: "font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-6 py-2 bg-[#141416] backdrop-blur-xl flex flex-col items-center justify-center min-w-[160px] shadow-2xl", children: [
         /* @__PURE__ */ jsx("span", { className: "text-[#6b7280] text-label mb-1 font-black", children: "TOTAL" }),
         /* @__PURE__ */ jsx("span", { className: "text-[#ffffff] font-bold tracking-tighter text-h2 tabular-nums", children: formatSecondsToTime(totalGeralSec) })
       ] }),
@@ -11060,36 +11455,10 @@ function EspelhoPage() {
         "button",
         {
           onClick: addBloco$1,
-          className: "inline-flex items-center gap-2 px-6 py-3 rounded-md bg-[#22c55e] text-white text-body-sm font-semibold uppercase tracking-widest shadow-lg transition-all duration-300 hover:shadow-xl active:scale-[0.98]",
+          className: "w-[220px] inline-flex items-center justify-center gap-2 px-6 py-3 rounded-md bg-[#22c55e] text-white text-body-sm font-semibold uppercase tracking-widest shadow-lg transition-all duration-300 hover:shadow-xl active:scale-[0.98]",
           children: [
             /* @__PURE__ */ jsx(Plus, { className: "h-4 w-4" }),
             " NOVO BLOCO"
-          ]
-        }
-      ),
-      /* @__PURE__ */ jsxs(
-        "a",
-        {
-          href: `/tp?date=${date}&programa=${encodeURIComponent(programa ?? "")}`,
-          target: "_blank",
-          rel: "noopener noreferrer",
-          className: "inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-white text-body-sm font-semibold uppercase tracking-wider hover:border-[#22c55e] hover:ring-4 hover:ring-[#22c55e]/10 transition-all duration-300 shadow-md active:scale-[0.98]",
-          children: [
-            /* @__PURE__ */ jsx(Tv, { className: "h-4 w-4 text-white" }),
-            " TP"
-          ]
-        }
-      ),
-      /* @__PURE__ */ jsxs(
-        "a",
-        {
-          href: `/playout?date=${date}&programa=${encodeURIComponent(programa ?? "")}`,
-          target: "_blank",
-          rel: "noopener noreferrer",
-          className: "inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-white text-body-sm font-semibold uppercase tracking-wider hover:border-[#22c55e] hover:ring-4 hover:ring-[#22c55e]/10 transition-all duration-300 shadow-md active:scale-[0.98]",
-          children: [
-            /* @__PURE__ */ jsx(Tv, { className: "h-4 w-4 text-white" }),
-            " PLAYOUT"
           ]
         }
       )
@@ -11197,7 +11566,7 @@ function EspelhoPage() {
                   /* @__PURE__ */ jsx("th", { className: "w-8" }),
                   /* @__PURE__ */ jsx("th", { className: "text-center px-2 py-2 w-10", children: "Status" }),
                   /* @__PURE__ */ jsx("th", { className: "text-left px-3 py-2 w-12", children: "#" }),
-                  /* @__PURE__ */ jsx("th", { className: "text-left px-3 py-2 min-w-[300px] w-[450px]", children: "Assunto / Cabeça" }),
+                  /* @__PURE__ */ jsx("th", { className: "text-left px-3 py-2 min-w-[180px] w-[240px]", children: "Assunto / Cabeça" }),
                   /* @__PURE__ */ jsx("th", { className: "text-left px-3 py-2 w-32", children: "Formato" }),
                   /* @__PURE__ */ jsx("th", { className: "text-center px-3 py-2 w-20 font-mono", children: "Cab." }),
                   /* @__PURE__ */ jsx("th", { className: "text-center px-3 py-2 w-20 font-mono", children: "VT" }),
@@ -11388,7 +11757,7 @@ function SortableRow({
           "td",
           {
             className: cn(
-              "w-8 px-2 py-2 text-[#4b5563]",
+              "w-8 px-2 py-1 text-[#4b5563]",
               !isLocked && "cursor-grab active:cursor-grabbing hover:bg-[#22c55e]/10 transition-colors duration-200"
             ),
             ...!isLocked ? attributes : {},
@@ -11396,7 +11765,7 @@ function SortableRow({
             children: /* @__PURE__ */ jsx(GripVertical, { className: "h-4 w-4" })
           }
         ),
-        /* @__PURE__ */ jsx("td", { className: "px-3 py-2", children: /* @__PURE__ */ jsx("div", { className: "flex items-center justify-center", children: /* @__PURE__ */ jsx(
+        /* @__PURE__ */ jsx("td", { className: "px-3 py-1", children: /* @__PURE__ */ jsx("div", { className: "flex items-center justify-center", children: /* @__PURE__ */ jsx(
           "div",
           {
             className: cn(
@@ -11405,8 +11774,8 @@ function SortableRow({
             )
           }
         ) }) }),
-        /* @__PURE__ */ jsx("td", { className: "px-3 py-2 font-mono text-[10px] text-[#6b7280] font-bold", children: /* @__PURE__ */ jsx("span", { className: "text-[#6b7280]", children: String(currentIndex + 1).padStart(2, "0") }) }),
-        /* @__PURE__ */ jsxs("td", { className: "px-3 py-2", children: [
+        /* @__PURE__ */ jsx("td", { className: "px-3 py-1 font-mono text-[10px] text-[#6b7280] font-bold", children: /* @__PURE__ */ jsx("span", { className: "text-[#6b7280]", children: String(currentIndex + 1).padStart(2, "0") }) }),
+        /* @__PURE__ */ jsxs("td", { className: "px-3 py-1", children: [
           /* @__PURE__ */ jsx(
             "input",
             {
@@ -11421,22 +11790,10 @@ function SortableRow({
               className: cn("w-full bg-transparent focus:outline-none font-medium text-[#ffffff]", isCurrent && "text-[#ffffff]")
             }
           ),
-          item.materia_id && linkedMateria && /* @__PURE__ */ jsxs(
-            "span",
-            {
-              className: cn(
-                "inline-block mt-1 text-[10px] uppercase tracking-widest font-bold",
-                isCurrent ? "text-red-400" : "text-[#22c55e]"
-              ),
-              children: [
-                "● ",
-                linkedMateria.titulo
-              ]
-            }
-          ),
+          false,
           isEditing && /* @__PURE__ */ jsx("span", { className: "inline-flex items-center gap-1 mt-0.5 ml-2 text-[10px] uppercase tracking-widest font-bold text-yellow-500 animate-pulse", children: "✏ Editando" })
         ] }),
-        /* @__PURE__ */ jsx("td", { className: "px-3 py-2", children: /* @__PURE__ */ jsxs(
+        /* @__PURE__ */ jsx("td", { className: "px-3 py-1", children: /* @__PURE__ */ jsxs(
           "select",
           {
             value: item.formato ?? "",
@@ -11449,7 +11806,7 @@ function SortableRow({
             ]
           }
         ) }),
-        /* @__PURE__ */ jsx("td", { className: "px-3 py-2 text-center", children: !isLocked ? /* @__PURE__ */ jsx(
+        /* @__PURE__ */ jsx("td", { className: "px-3 py-1 text-center", children: !isLocked ? /* @__PURE__ */ jsx(
           "button",
           {
             type: "button",
@@ -11459,7 +11816,7 @@ function SortableRow({
             children: /* @__PURE__ */ jsx("span", { className: "text-caption", children: tempoCab || "0:00" })
           }
         ) : /* @__PURE__ */ jsx("span", { className: "w-16 inline-block font-mono text-center text-[#6b7280]", children: tempoCab || "0:00" }) }),
-        /* @__PURE__ */ jsx("td", { className: "px-3 py-2 text-center", children: /* @__PURE__ */ jsx(
+        /* @__PURE__ */ jsx("td", { className: "px-3 py-1 text-center", children: /* @__PURE__ */ jsx(
           "input",
           {
             value: tempo,
@@ -11474,15 +11831,15 @@ function SortableRow({
           "td",
           {
             className: cn(
-              "px-3 py-2 text-center font-bold font-mono",
+              "px-3 py-1 text-center font-bold font-mono",
               isCurrent ? "text-[#ffffff]" : "text-[#22c55e]"
             ),
             children: calcTotal(item)
           }
         ),
-        /* @__PURE__ */ jsx("td", { className: "px-3 py-2", children: /* @__PURE__ */ jsx("span", { className: "text-caption text-[#6b7280]", children: linkedMateria?.editor_texto ?? "—" }) }),
-        /* @__PURE__ */ jsx("td", { className: "px-3 py-2", children: /* @__PURE__ */ jsx("span", { className: "text-caption text-[#6b7280]", children: linkedMateria?.editor_imagem ?? "—" }) }),
-        /* @__PURE__ */ jsxs("td", { className: "px-3 py-2", children: [
+        /* @__PURE__ */ jsx("td", { className: "px-3 py-1", children: /* @__PURE__ */ jsx("span", { className: "text-caption text-[#6b7280]", children: linkedMateria?.editor_texto ?? "—" }) }),
+        /* @__PURE__ */ jsx("td", { className: "px-3 py-1", children: /* @__PURE__ */ jsx("span", { className: "text-caption text-[#6b7280]", children: linkedMateria?.editor_imagem ?? "—" }) }),
+        /* @__PURE__ */ jsxs("td", { className: "px-3 py-1", children: [
           /* @__PURE__ */ jsxs(
             "select",
             {
@@ -11501,7 +11858,7 @@ function SortableRow({
           ),
           false
         ] }),
-        /* @__PURE__ */ jsx("td", { className: "px-3 py-2", children: /* @__PURE__ */ jsx(
+        /* @__PURE__ */ jsx("td", { className: "px-3 py-1", children: /* @__PURE__ */ jsx(
           "button",
           {
             onClick: () => onDelete(item.id),
