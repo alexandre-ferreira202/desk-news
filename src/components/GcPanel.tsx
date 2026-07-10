@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 interface GcPanelProps {
@@ -107,7 +108,10 @@ export default function GcPanel({
   onClear,
   onSkip,
 }: GcPanelProps) {
-  const [position, setPosition] = useState({ x: 100, y: 100 });
+  const [position, setPosition] = useState(() => ({
+    x: typeof window !== "undefined" ? Math.max(24, window.innerWidth / 2 - 260) : 100,
+    y: typeof window !== "undefined" ? Math.max(24, window.innerHeight / 2 - 220) : 100,
+  }));
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const dragRef = useRef<HTMLDivElement>(null);
@@ -147,24 +151,21 @@ export default function GcPanel({
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <>
-      {/* Overlay semitransparente */}
+      {/* Camada invisível apenas para fechar ao clicar fora — sem escurecer/borrar o fundo */}
       <div
         onClick={onClose}
         style={{
           position: "fixed",
           inset: 0,
           zIndex: 9998,
-          background: "rgba(0,0,0,0.3)",
-          backdropFilter: "blur(4px)",
         }}
       />
 
       {/* Janela Flutuante */}
       <div
         ref={dragRef}
-        onMouseDown={handleMouseDown}
         style={{
           position: "fixed",
           left: `${position.x}px`,
@@ -178,12 +179,12 @@ export default function GcPanel({
           boxShadow: "0 20px 60px rgba(0,0,0,0.8)",
           display: "flex",
           flexDirection: "column",
-          cursor: isDragging ? "grabbing" : "grab",
           overflow: "hidden",
         }}
       >
-        {/* Header */}
+        {/* Header — arraste por aqui para mover a janela */}
         <div
+          onMouseDown={handleMouseDown}
           style={{
             display: "flex",
             alignItems: "center",
@@ -191,6 +192,8 @@ export default function GcPanel({
             padding: "16px 20px",
             borderBottom: "1px solid #27272a",
             background: "linear-gradient(135deg, #27272a 0%, #1f1f23 100%)",
+            cursor: isDragging ? "grabbing" : "grab",
+            userSelect: "none",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -206,6 +209,7 @@ export default function GcPanel({
             >
               GC Panel
             </span>
+            <span style={{ fontSize: 10, color: "#71717a", marginLeft: 4 }}>⠿ arraste para mover</span>
           </div>
           <button
             onClick={onClose}
@@ -607,6 +611,7 @@ export default function GcPanel({
           50% { opacity: 0.4; }
         }
       `}</style>
-    </>
+    </>,
+    document.body
   );
 }

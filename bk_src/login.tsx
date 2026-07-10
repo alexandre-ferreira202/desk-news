@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { Sun, Moon } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/lib/supabase";
+import { signIn, getSession } from "@/lib/auth";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -16,88 +16,43 @@ function LoginPage() {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const navigate = useNavigate();
 
+  // Redireciona se já tem sessão
   useEffect(() => {
-    const savedTheme = localStorage.getItem("theme");
-    if (savedTheme) {
-      setIsDarkMode(savedTheme === "dark");
-    } else {
-      setIsDarkMode(window.matchMedia("(prefers-color-scheme: dark)").matches);
-    }
+    if (getSession()) navigate({ to: "/pautas" });
   }, []);
 
   useEffect(() => {
-    const htmlElement = document.documentElement;
-    if (isDarkMode) {
-      htmlElement.classList.add("dark");
-    } else {
-      htmlElement.classList.remove("dark");
-    }
-    localStorage.setItem("theme", isDarkMode ? "dark" : "light");
-  }, [isDarkMode]);
+    const savedTheme = localStorage.getItem("desknews-theme");
+    if (savedTheme) setIsDarkMode(savedTheme === "dark");
+    else setIsDarkMode(window.matchMedia("(prefers-color-scheme: dark)").matches);
+  }, []);
 
-  const toggleTheme = () => setIsDarkMode(!isDarkMode);
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", isDarkMode ? "dark" : "light");
+    localStorage.setItem("desknews-theme", isDarkMode ? "dark" : "light");
+  }, [isDarkMode]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!email || !password) { toast.error("Preencha todos os campos."); return; }
 
-    if (!email || !password) {
-      toast.error("Preencha todos os campos.");
+    setLoading(true);
+    const { user, error } = await signIn(email, password);
+    setLoading(false);
+
+    if (error || !user) {
+      toast.error(error ?? "Erro ao fazer login.");
       return;
     }
 
-    setLoading(true);
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) {
-        toast.error("Credenciais inválidas.");
-        setLoading(false);
-        return;
-      }
-
-      if (!data.user) {
-        toast.error("Erro ao fazer login.");
-        setLoading(false);
-        return;
-      }
-
-      const { data: userData, error: permError } = await supabase
-        .from("users")
-        .select("id, email, pode_acessar_pautas")
-        .eq("email", data.user.email)
-        .single();
-
-      if (permError || !userData) {
-        toast.error("Usuário não encontrado no sistema. Contate a chefia de redação.");
-        await supabase.auth.signOut();
-        setLoading(false);
-        return;
-      }
-
-      if (!userData.pode_acessar_pautas) {
-        toast.error("Você não tem permissão para acessar pautas. Contate a chefia de redação.");
-        await supabase.auth.signOut();
-        setLoading(false);
-        return;
-      }
-
-      toast.success("Login realizado com sucesso!");
-      navigate({ to: "/pautas" });
-    } catch (err) {
-      toast.error("Erro inesperado ao conectar com o servidor.");
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    toast.success(`Bem-vindo, ${user.nome}!`);
+    navigate({ to: "/pautas" });
   };
 
   return (
     <div className="min-h-screen bg-[#09090b] text-slate-100 font-sans flex items-center justify-center px-4">
       <button
-        onClick={toggleTheme}
+        onClick={() => setIsDarkMode(!isDarkMode)}
         className="fixed top-6 right-6 p-3 rounded-lg border border-[#22c55e]/30 bg-[#0f0f12] hover:bg-[#1a1a21] text-[#22c55e] transition-all duration-300"
         aria-label="Alternar tema"
       >
@@ -106,7 +61,7 @@ function LoginPage() {
 
       <div className="w-full max-w-sm">
         <div className="flex items-center gap-2 mb-12 justify-center">
-          <div className="h-2 w-2 rounded-full bg-[#22c55e] animate-pulse"></div>
+          <div className="h-2 w-2 rounded-full bg-[#22c55e] animate-pulse" />
           <span className="text-xs font-mono uppercase tracking-[0.2em] text-slate-400">On Air</span>
         </div>
 
@@ -124,7 +79,7 @@ function LoginPage() {
                 placeholder="email@jornal.com"
                 className="w-full px-4 py-3 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all duration-200 font-mono text-sm"
               />
-              <div className="absolute inset-y-0 right-0 w-px bg-gradient-to-b from-[#22c55e]/0 via-[#22c55e] to-[#22c55e]/0 opacity-50"></div>
+              <div className="absolute inset-y-0 right-0 w-px bg-gradient-to-b from-[#22c55e]/0 via-[#22c55e] to-[#22c55e]/0 opacity-50" />
             </div>
             <div className="relative">
               <input
@@ -135,7 +90,7 @@ function LoginPage() {
                 placeholder="senha"
                 className="w-full px-4 py-3 rounded-md bg-[#141416] border border-[#22c55e]/30 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]/50 transition-all duration-200 font-mono text-sm"
               />
-              <div className="absolute inset-y-0 right-0 w-px bg-gradient-to-b from-[#22c55e]/0 via-[#22c55e] to-[#22c55e]/0 opacity-50"></div>
+              <div className="absolute inset-y-0 right-0 w-px bg-gradient-to-b from-[#22c55e]/0 via-[#22c55e] to-[#22c55e]/0 opacity-50" />
             </div>
             <button
               type="submit"

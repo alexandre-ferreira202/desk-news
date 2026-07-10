@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
 import { Plus, ClipboardList, Calendar as CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,7 @@ interface Relatorio {
 }
 
 function RelatoriosPage() {
-  const user = null;
+  const { user } = useAuth();
   const [relatorios, setRelatorios] = useState<Relatorio[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -39,7 +40,7 @@ function RelatoriosPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    let query = supabase.from("relatorio").select("*").order("data", { ascending: false });
+    let query = supabase.from("relatorios").select("*").order("data", { ascending: false });
     
     if (dataInicio) query = query.gte("data", dataInicio);
     if (dataFim) query = query.lte("data", dataFim);
@@ -56,12 +57,16 @@ function RelatoriosPage() {
 
   return (
     <div className="min-h-screen p-4 sm:p-6 bg-[#09090b] text-slate-100 font-sans">
-      <div className="flex items-center gap-3 border-b border-[#22c55e]/20 pb-4 mb-8">
-        <div className="flex items-center justify-center h-9 w-9 rounded-md bg-[#22c55e]/10 border border-[#22c55e]/40">
-          <ClipboardList className="h-5 w-5 text-[#22c55e]" />
+      <div className="border-b border-[#22c55e]/20 pb-4 mb-8">
+        <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#22c55e] mb-1">
+          {new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" }).toUpperCase()}
+        </p>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center h-10 w-10 rounded-md bg-[#22c55e]/10 border border-[#22c55e]/40">
+            <ClipboardList className="h-5 w-5 text-[#22c55e]" />
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-black tracking-tight font-mono uppercase text-white">Relatórios</h1>
         </div>
-        <h1 className="text-2xl font-black tracking-tight font-mono uppercase text-white">Relatórios</h1>
-        <span className="text-xs text-slate-500 hidden sm:inline font-mono uppercase ml-auto">Gestão Editorial</span>
       </div>
 
       <div className="flex items-center justify-between mb-8">
@@ -183,7 +188,7 @@ function NewRelatorioModal({ userId, onClose, onSaved }: { userId: string; onClo
     if (!retranca || !texto) return toast.error("Preencha todos os campos obrigatórios.");
     
     setSaving(true);
-    const { error } = await supabase.from("relatorio").insert({
+    const { error } = await supabase.from("relatorios").insert({
       data,
       retranca,
       evento,

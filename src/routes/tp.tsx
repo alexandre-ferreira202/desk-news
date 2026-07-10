@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
 import { updateItem as updateItemStatusFn } from "@/functions/espelho.functions";
 import { toast } from "sonner";
 import { 
@@ -326,6 +327,13 @@ function ReadingMonitor({
   );
 }
 
+// Canal de sincronização Master ⇄ Câmera (e leitores externos, como o playout).
+// Normalizado (trim + lowercase) para não quebrar por causa de espaços extras
+// ou diferença de maiúsculas/minúsculas entre as telas.
+function tpCanalKey(programa: string | undefined | null): string {
+  return `tp-sync-${(programa || "geral").trim().toLowerCase()}`;
+}
+
 function TeleprompterPage() {
   const searchParams = Route.useSearch();
   const [date, setDate] = useState(searchParams.date || "");
@@ -457,6 +465,40 @@ function TeleprompterPage() {
   }, [date, programa]);
 
   // ─────────────────────────────────────────────────────────────────────────
+  // COMANDO REMOTO DE MODO — permite que o playout "force" esta tela para
+  // MASTER com um clique (botão 🎙️ MASTER no painel Teleprompter do playout).
+  // Roda SEMPRE, independente do syncMode atual, para poder receber o comando
+  // mesmo quando a tela está em modo câmera (ou ninguém mexeu ainda).
+  // ─────────────────────────────────────────────────────────────────────────
+  const lastAppliedRequestedModeRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key = tpCanalKey(programa);
+    const interval = setInterval(async () => {
+      try {
+        const { rows } = await db.query(
+          `SELECT state FROM tp_master_state WHERE canal = $1 LIMIT 1`,
+          [key]
+        );
+        const state = rows?.[0]?.state as { requestedMode?: "master" | "camera" } | undefined;
+        const requestedMode = state?.requestedMode;
+        if (
+          requestedMode &&
+          (requestedMode === "master" || requestedMode === "camera") &&
+          requestedMode !== syncMode &&
+          lastAppliedRequestedModeRef.current !== requestedMode
+        ) {
+          lastAppliedRequestedModeRef.current = requestedMode;
+          setSyncMode(requestedMode);
+        }
+      } catch {
+        // silencioso — tenta de novo no próximo ciclo
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [programa, syncMode]);
+
+  // ─────────────────────────────────────────────────────────────────────────
   // SYNC MASTER → CAMERA via polling (substitui supabase.channel broadcast)
   // Master: grava estado em tp_master_state a cada mudança
   // Camera: lê tp_master_state a cada 500ms
@@ -467,23 +509,25 @@ function TeleprompterPage() {
     setIsConnected(true);
 
     const interval = setInterval(async () => {
-      const key = `tp-sync-${programa || "geral"}`;
-      const { data, error } = await supabase
-        .from("tp_master_state")
-        .select("*")
-        .eq("canal", key)
-        .maybeSingle();
-
-      if (error || !data) return;
-
-      const payload = data.state as {
+      const key = tpCanalKey(programa);
+      let payload: {
         selectedItemId?: string;
         isScrolling?: boolean;
         fontSize?: number;
         scrollSpeed?: number;
         mirrored?: boolean;
         scrollTop?: number;
-      };
+      } | undefined;
+      try {
+        const { rows } = await db.query(
+          `SELECT state FROM tp_master_state WHERE canal = $1 LIMIT 1`,
+          [key]
+        );
+        payload = rows?.[0]?.state;
+      } catch {
+        return;
+      }
+      if (!payload) return;
 
       isRemoteUpdateRef.current = true;
 
@@ -520,19 +564,27 @@ function TeleprompterPage() {
     const now = Date.now();
     if (now - lastBroadcastTimeRef.current < 2000) return; // throttle 2s via ref
     lastBroadcastTimeRef.current = now;
-    const key = `tp-sync-${s.programa || "geral"}`;
-    await supabase.from("tp_master_state").upsert({
-      canal: key,
-      state: {
-        selectedItemId: s.selectedItemId,
-        isScrolling: s.isScrolling,
-        fontSize: s.fontSize,
-        scrollSpeed: s.scrollSpeed,
-        mirrored: s.mirrored,
-        scrollTop: scrollRef.current?.scrollTop || 0,
-      },
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "canal" });
+    const key = tpCanalKey(s.programa);
+    const state = {
+      selectedItemId: s.selectedItemId,
+      isScrolling: s.isScrolling,
+      fontSize: s.fontSize,
+      scrollSpeed: s.scrollSpeed,
+      mirrored: s.mirrored,
+      scrollTop: scrollRef.current?.scrollTop || 0,
+    };
+    try {
+      await db.query(
+        `INSERT INTO tp_master_state (canal, state, updated_at)
+         VALUES ($1, $2::jsonb, now())
+         ON CONFLICT (canal) DO UPDATE
+           SET state = $2::jsonb,
+               updated_at = now()`,
+        [key, JSON.stringify(state)]
+      );
+    } catch (err) {
+      console.error("[TP] Erro ao publicar estado do master:", err);
+    }
   }, []);
 
   // Upsert ao mudar estado discreto (item, play/pause, fonte, velocidade, espelho)
@@ -651,15 +703,13 @@ function TeleprompterPage() {
             rodaTvFiredRef.current !== currentItem.id
           ) {
             rodaTvFiredRef.current = currentItem.id;
-            // Envia sinal RODA_VT via tabela (substitui channel broadcast)
-            supabase.from("tp_playout_events").insert({
-              event: "RODA_VT",
-              materia_id: currentItem.materia_id ?? null,
-              assunto: currentItem.assunto,
-              item_id: currentItem.id,
-              created_at: new Date().toISOString(),
-            }).then(({ error }) => {
-              if (error) console.error("Erro ao enviar RODA_VT:", error.message);
+            // Envia sinal RODA_VT via tabela (Neon/Postgres — lido via polling no Playout)
+            db.query(
+              `INSERT INTO tp_playout_events (event, materia_id, assunto, item_id, created_at)
+               VALUES ($1, $2, $3, $4, now())`,
+              ["RODA_VT", currentItem.materia_id ?? null, currentItem.assunto, currentItem.id]
+            ).catch((error: any) => {
+              console.error("Erro ao enviar RODA_VT:", error?.message ?? error);
             });
           }
           
@@ -866,6 +916,11 @@ function TeleprompterPage() {
             )}>
               {syncMode === "master" ? "🎙️ MASTER" : "🎥 CÂMERA"}
             </div>
+
+            {/* Canal de sincronização — compare com o mesmo texto no painel do playout */}
+            <span className="text-[9px] font-mono text-zinc-600 px-1" title="Precisa ser idêntico ao 'canal' mostrado no painel Teleprompter do playout">
+              canal: {tpCanalKey(programa)}
+            </span>
             
             {/* Status Sincronização */}
             {syncMode === "camera" && (

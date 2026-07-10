@@ -1338,13 +1338,17 @@ ${estrutura}`;
                 {(() => {
                   const ativo = revisarCreditos.find(c => revisarCurrentTime >= c.timecode && revisarCurrentTime < c.timecode + c.duracao);
                   if (!ativo) return null;
+                  // Separa "NOME / FUNÇÃO" ou "NOME // LOCAL" para exibir corretamente nas linhas da tarja
+                  const partes = ativo.valor.split(/\/+/).map((p: string) => p.trim());
+                  const linha1 = partes[0] || ativo.valor;
+                  const linha2 = partes[1] || ativo.tipo.replace("_", " ");
                   return (
                     <div className="absolute bottom-3 left-3 right-3 pointer-events-none">
                       <div className="flex items-stretch overflow-hidden rounded-sm shadow-xl max-w-xs">
                         <div className="w-1 shrink-0" style={{ backgroundColor: ativo.cor }} />
                         <div className="px-3 py-1.5 flex-1" style={{ backgroundColor: 'rgba(0,0,0,0.92)' }}>
-                          <div className="text-white font-bold text-xs uppercase tracking-wide">{ativo.valor}</div>
-                          <div className="text-[10px] uppercase tracking-widest" style={{ color: ativo.cor }}>{ativo.tipo.replace("_", " ")}</div>
+                          <div className="text-white font-bold text-xs uppercase tracking-wide">{linha1}</div>
+                          <div className="text-[10px] uppercase tracking-widest" style={{ color: ativo.cor }}>{linha2}</div>
                         </div>
                       </div>
                     </div>

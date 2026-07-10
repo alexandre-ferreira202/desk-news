@@ -676,27 +676,20 @@ function ConfigTarjaModal({
 // ─── Main: GC Panel ───────────────────────────────────────────────────────────
 
 export default function GcPanel({
-  // Opcional: receber callbacks externos
+  // Controlled state from playout.tsx
+  gcLine1, setGcLine1,
+  gcLine2, setGcLine2,
+  gcDuration, setGcDuration,
+  gcVisible, setGcVisible,
+  gcCreditsQueue,
+  // Callbacks
   onTake,
   onClear,
-  // Props controlled: quando definidas, o painel reflete os valores externos
-  externalLine1,
-  externalLine2,
+  onSkip,
+  // Notifica o playout sempre que o PNG/posição/fonte da tarja mudar,
+  // para que ele possa repassar isso pro output real (WebSocket).
+  onLayerChange,
 }) {
-  // GC state
-  const [gcLine1, setGcLine1] = useState(externalLine1 || "");
-  const [gcLine2, setGcLine2] = useState(externalLine2 || "");
-  const [gcDuration, setGcDuration] = useState(0); // 0 = manual
-  const [gcVisible, setGcVisible] = useState(false);
-
-  // Sincroniza inputs quando o pai manda novos valores (botão GC da lauda)
-  useEffect(() => {
-    if (externalLine1 !== undefined) setGcLine1(externalLine1);
-  }, [externalLine1]);
-
-  useEffect(() => {
-    if (externalLine2 !== undefined) setGcLine2(externalLine2);
-  }, [externalLine2]);
 
   // Layer / Tarja modal
   const [layerOpen, setLayerOpen] = useState(false);
@@ -719,58 +712,50 @@ export default function GcPanel({
   const [font2X, setFont2X] = useState(8);
   const [font2Y, setFont2Y] = useState(70);
 
-  // GC auto fade out
+  // ── Repassa a config de layer da tarja pro playout sempre que mudar ──
   useEffect(() => {
-    if (!gcVisible || gcDuration === 0) return;
-    const timer = setTimeout(() => setGcVisible(false), gcDuration * 1000);
-    return () => clearTimeout(timer);
-  }, [gcVisible, gcDuration]);
+    onLayerChange?.({
+      tarjaCustomPng,
+      tarjaScaleX, tarjaScaleY,
+      tarjaX, tarjaY,
+      font1Size, font1X, font1Y,
+      font2Size, font2X, font2Y,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    tarjaCustomPng,
+    tarjaScaleX, tarjaScaleY,
+    tarjaX, tarjaY,
+    font1Size, font1X, font1Y,
+    font2Size, font2X, font2Y,
+  ]);
 
   const handleTake = useCallback(() => {
-    if (!gcLine1 && !gcLine2) return;
-    setGcVisible(true);
-    onTake?.({
-      line1: gcLine1,
-      line2: gcLine2,
-      tarjaPng: tarjaCustomPng || null,
-      tarjaX,
-      tarjaY,
-      tarjaScaleX,
-      tarjaScaleY,
-      font1Size,
-      font1X,
-      font1Y,
-      font2Size,
-      font2X,
-      font2Y,
-    });
-  }, [gcLine1, gcLine2, tarjaCustomPng, tarjaX, tarjaY, tarjaScaleX, tarjaScaleY, font1Size, font1X, font1Y, font2Size, font2X, font2Y, onTake]);
+    onTake?.();
+  }, [onTake]);
 
   const handleClear = useCallback(() => {
-    setGcVisible(false);
     onClear?.();
   }, [onClear]);
 
   const handleSkip = useCallback(() => {
-    setGcLine1("");
-    setGcLine2("");
-    setGcVisible(false);
-  }, []);
+    onSkip?.();
+  }, [onSkip]);
 
   // ── Styles ──
   const panelStyle = {
     background: "#18181b",
     border: "1px solid #27272a",
-    borderRadius: 24,
-    padding: 24,
+    borderRadius: 16,
+    padding: 16,
     display: "flex",
     flexDirection: "column",
-    gap: 20,
-    boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+    gap: 14,
     fontFamily: "'Inter', 'Segoe UI', sans-serif",
-    minWidth: 320,
-    maxWidth: 420,
+    width: "100%",
+    minWidth: 0,
     position: "relative",
+    boxSizing: "border-box",
   };
 
   const inputStyle = {
@@ -827,7 +812,7 @@ export default function GcPanel({
 
   return (
     <>
-      <div style={panelStyle}>
+    <div style={panelStyle}>
         {/* ── Header ── */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{
@@ -915,24 +900,28 @@ export default function GcPanel({
             </span>
 
             {(gcLine1 || gcLine2) ? (
-              <div style={{
-                position: "absolute", bottom: 4, left: 4, right: 4,
-              }}>
+              <div style={{ position: "absolute", bottom: 4, left: 4, right: 4 }}>
                 {tarjaCustomPng ? (
+                  /* ── Tarja PNG personalizada com texto sobreposto ── */
                   <div style={{ position: "relative", lineHeight: 0 }}>
-                    <img src={tarjaCustomPng} alt="tarja" style={{ width: "100%", borderRadius: 2 }} />
+                    <img
+                      src={tarjaCustomPng}
+                      alt="tarja"
+                      style={{ width: "100%", borderRadius: 2, display: "block" }}
+                    />
                     {gcLine1 && (
                       <div style={{
                         position: "absolute",
                         left: `${font1X}%`,
                         top: `${font1Y}%`,
-                        fontSize: Math.max(4, font1Size * 0.35),
+                        fontSize: Math.max(4, font1Size * 0.32),
                         fontWeight: 900,
                         color: "#fff",
                         whiteSpace: "nowrap",
                         transform: "translateY(-50%)",
                         fontFamily: "sans-serif",
                         textShadow: "0 1px 3px rgba(0,0,0,0.9)",
+                        letterSpacing: "0.03em",
                       }}>
                         {gcLine1}
                       </div>
@@ -942,7 +931,7 @@ export default function GcPanel({
                         position: "absolute",
                         left: `${font2X}%`,
                         top: `${font2Y}%`,
-                        fontSize: Math.max(3, font2Size * 0.35),
+                        fontSize: Math.max(3, font2Size * 0.32),
                         color: "#d4d4d8",
                         whiteSpace: "nowrap",
                         transform: "translateY(-50%)",
@@ -954,20 +943,18 @@ export default function GcPanel({
                     )}
                   </div>
                 ) : (
-                  <div style={{ display: "flex", alignItems: "stretch", borderRadius: 2, overflow: "hidden" }}>
-                    <div style={{ width: 2, background: "#dc2626", flexShrink: 0 }} />
-                    <div style={{ background: "rgba(0,0,0,0.88)", padding: "3px 5px", flex: 1, minWidth: 0 }}>
-                      {gcLine1 && (
-                        <div style={{ color: "#fff", fontWeight: 900, fontSize: 7, textTransform: "uppercase", overflow: "hidden", whiteSpace: "nowrap", lineHeight: 1.3 }}>
-                          {gcLine1}
-                        </div>
-                      )}
-                      {gcLine2 && (
-                        <div style={{ color: "#a1a1aa", fontSize: 6, textTransform: "uppercase", overflow: "hidden", whiteSpace: "nowrap", lineHeight: 1.3 }}>
-                          {gcLine2}
-                        </div>
-                      )}
-                    </div>
+                  /* ── Sem PNG: exibe somente o texto com fundo escuro ── */
+                  <div style={{ background: "rgba(0,0,0,0.82)", borderRadius: 3, padding: "4px 6px", borderLeft: "2px solid #dc2626" }}>
+                    {gcLine1 && (
+                      <div style={{ color: "#fff", fontWeight: 900, fontSize: 7, textTransform: "uppercase", overflow: "hidden", whiteSpace: "nowrap", lineHeight: 1.4 }}>
+                        {gcLine1}
+                      </div>
+                    )}
+                    {gcLine2 && (
+                      <div style={{ color: "#a1a1aa", fontSize: 6, textTransform: "uppercase", overflow: "hidden", whiteSpace: "nowrap", lineHeight: 1.3 }}>
+                        {gcLine2}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -20,13 +20,11 @@ import {
   Youtube,
   X,
   Link,
-  Type,
   Image as ImageIcon,
   Grid2X2,
   Volume2,
   VolumeX,
   PowerOff,
-  Sliders,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import GcPanel from "@/components/GcPanel";
@@ -856,6 +854,17 @@ function PlayoutPage() {
   const [gcLine1, setGcLine1] = useState("");
   const [gcLine2, setGcLine2] = useState("");
   const [gcCreditsQueue, setGcCreditsQueue] = useState<{ line1: string; line2: string }[]>([]);
+  // Config de layer da tarja (PNG custom + posição/tamanho/fonte), controlada pelo GcPanel
+  const [gcLayerConfig, setGcLayerConfig] = useState<{
+    tarjaCustomPng: string | null;
+    tarjaScaleX: number; tarjaScaleY: number;
+    tarjaX: number; tarjaY: number;
+    font1Size: number; font1X: number; font1Y: number;
+    font2Size: number; font2X: number; font2Y: number;
+  } | null>(null);
+  const handleGcLayerChange = useCallback((config: typeof gcLayerConfig) => {
+    setGcLayerConfig(config);
+  }, []);
   const [gcDuration, setGcDuration] = useState(0); // 0 = manual, >0 = segundos até fade out
   const [gcHistory, setGcHistory] = useState<Array<{ line1: string; line2: string }>>([]);
   const [gcPresets, setGcPresets] = useState<Record<string, { line1: string; line2: string }>>({
@@ -863,7 +872,7 @@ function PlayoutPage() {
     "Âncora": { line1: "", line2: "Âncora" },
     "Especialista": { line1: "", line2: "Especialista" },
   });
-  const [gcPanelOpen, setGcPanelOpen] = useState(false);
+
 
   // ── AUTO-CRÉDITOS (Groq) ──
   const { extractCredits, isLoading: isLoadingAutoCredits } = useAutoCredits({
@@ -976,6 +985,17 @@ function PlayoutPage() {
   const [generalJournalTime, setGeneralJournalTime] = useState(0); // Regressiva geral do jornal
   const [doubleClickCount, setDoubleClickCount] = useState(0); // Para double-click no GC ERASE ALL
   const [transValue, setTransValue] = useState(0); // 0 = PGM puro, 100 = Preview puro (fusão)
+  const [transitionType, setTransitionType] = useState<"cut" | "dissolve" | "wipe">("cut");
+  const [wipeDirIdx, setWipeDirIdx] = useState(0); // 0=→ 1=← 2=↓ 3=↑ 4=⬋ 5=⬊
+  const [autoTransDur, setAutoTransDur] = useState(30); // frames simulados
+  const [autoTransRunning, setAutoTransRunning] = useState(false);
+  const autoTransRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [dskActive, setDskActive] = useState(false);
+  const [dskOpacity, setDskOpacity] = useState(100);
+  const [dskPng, setDskPng] = useState<string | null>(null);
+  const dskFileInputRef = useRef<HTMLInputElement>(null);
+  const [pgmBus, setPgmBus] = useState<"cam1"|"cam2"|"cam3"|"cam4"|"vt"|"black">("black");
+  const [pvwBus, setPvwBus] = useState<"cam1"|"cam2"|"cam3"|"cam4"|"vt"|"black">("cam1");
   // Opacidade e z-index dos players via estado React (evita re-render sobrescrever inline style)
   const [playerAOpacity, setPlayerAOpacity] = useState(1);
   const [playerBOpacity, setPlayerBOpacity] = useState(0);
@@ -1882,11 +1902,8 @@ function PlayoutPage() {
   useEffect(() => { preloadInactivePlayerRef.current = preloadInactivePlayer; }, [preloadInactivePlayer]);
   useEffect(() => { sendPgmCamCommandRef.current = sendPgmCamCommand; }, [sendPgmCamCommand]);
 
-  useEffect(() => {
-    const ch = new BroadcastChannel("desknews_playout_sync");
-    ch.onmessage = async (event: MessageEvent) => {
-      if (event.data?.type !== "RODA_VT") return;
-      const { materiaId, assunto, itemId } = event.data?.payload ?? {};
+  const processRodaVt = useCallback(async (payload: { materiaId?: string | null; assunto?: string; itemId?: string | null }) => {
+      const { materiaId, assunto, itemId } = payload ?? {};
       console.log("[Playout] RODA_VT recebido →", { materiaId, assunto, itemId });
 
         // ── 1. Sincroniza posição na fila ─────────────────────────────────
@@ -2130,11 +2147,65 @@ function PlayoutPage() {
             console.error("[Playout] RODA_VT: erro ao carregar lauda →", err);
           }
         }
+  // Refs usadas dentro da função são atualizadas via useEffect acima
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const processRodaVtRef = useRef(processRodaVt);
+  useEffect(() => { processRodaVtRef.current = processRodaVt; }, [processRodaVt]);
+
+  // ── Escuta RODA_VT via BroadcastChannel (mesma máquina / mesma origem) ──
+  useEffect(() => {
+    const ch = new BroadcastChannel("desknews_playout_sync");
+    ch.onmessage = (event: MessageEvent) => {
+      if (event.data?.type !== "RODA_VT") return;
+      processRodaVtRef.current(event.data?.payload ?? {});
+    };
+    return () => { ch.close(); };
+  }, []);
+
+  // ── Escuta RODA_VT via polling na tabela tp_playout_events (cross-machine) ──
+  // O Teleponto (tp.tsx) grava o evento nessa tabela; aqui fazemos polling
+  // porque o realtime do Supabase não está disponível neste projeto.
+  useEffect(() => {
+    const lastProcessedIdRef = { current: null as string | null };
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const { rows } = await db.query(
+          `SELECT id, materia_id, assunto, item_id, created_at
+           FROM tp_playout_events
+           WHERE event = 'RODA_VT'
+           ORDER BY created_at DESC
+           LIMIT 1`
+        );
+        const latest = rows?.[0];
+        if (!latest || cancelled) return;
+
+        if (lastProcessedIdRef.current === null) {
+          // Primeira leitura — apenas marca como visto, não dispara (evita
+          // reprocessar um evento antigo ao abrir/recarregar a página).
+          lastProcessedIdRef.current = latest.id;
+          return;
+        }
+
+        if (latest.id !== lastProcessedIdRef.current) {
+          lastProcessedIdRef.current = latest.id;
+          processRodaVtRef.current({
+            materiaId: latest.materia_id,
+            assunto: latest.assunto,
+            itemId: latest.item_id,
+          });
+        }
+      } catch (err) {
+        console.error("[Playout] Erro no polling de tp_playout_events:", err);
+      }
     };
 
-    return () => { ch.close(); };
-  // Canal abre 1x no mount — estado lido via refs atualizados acima
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    poll();
+    const interval = setInterval(poll, 1500);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
   // ── Handle select file from sidebar ──
@@ -2572,6 +2643,36 @@ function PlayoutPage() {
     toast.success(`Fusão concluída: "${selectedFile.name}"`);
   };
 
+  // ── AUTO TRANS — executa dissolve automático em N frames simulados ──
+  const handleAutoTrans = useCallback(() => {
+    if (autoTransRunning) return;
+    if (transitionType === "cut") { handleTransition(); handleTransComplete(); return; }
+    handleTransition();
+    setAutoTransRunning(true);
+    const totalSteps = Math.max(10, autoTransDur);
+    let step = 0;
+    const interval = setInterval(() => {
+      step++;
+      const pct = Math.round((step / totalSteps) * 100);
+      setTransValue(pct);
+      applyTransOpacity(pct, activePlayer);
+      if (step >= totalSteps) {
+        clearInterval(interval);
+        autoTransRef.current = null;
+        setAutoTransRunning(false);
+        handleTransComplete();
+      }
+    }, 16);
+    autoTransRef.current = interval;
+  }, [autoTransRunning, transitionType, autoTransDur, activePlayer]);
+
+  // ── DSK FILE LOAD ──
+  const handleDskLoad = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => setDskPng(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
   const handleSkip = () => {
     if (currentIndex < items.length - 1) {
       const nextIndex = currentIndex + 1;
@@ -2651,7 +2752,12 @@ function PlayoutPage() {
   const handleGcTakeQueue = () => {
     // Exibe na tela o que está atualmente nos inputs (gcLine1/gcLine2)
     setGcVisible(true);
-    pgmChannelRef.current?.readyState === 1 && pgmChannelRef.current.send(JSON.stringify({ type: "gc_show", line1: gcLine1, line2: gcLine2 }));
+    pgmChannelRef.current?.readyState === 1 && pgmChannelRef.current.send(JSON.stringify({
+      type: "gc_show",
+      line1: gcLine1,
+      line2: gcLine2,
+      ...(gcLayerConfig || {}),
+    }));
 
     // Remove da coluna LAUDA o crédito que acabou de ir ao ar
     if (gcLine1) removerItemDaLaudaPorNome(gcLine1);
@@ -3265,15 +3371,73 @@ function PlayoutPage() {
                 )}
                 {/* GC Overlay */}
                 {gcVisible && (gcLine1 || gcLine2) && (
-                  <div className="absolute bottom-0 left-0 right-0 z-40 px-2 pb-2 animate-in slide-in-from-bottom duration-300">
-                    <div className="flex items-stretch overflow-hidden rounded">
-                      <div className="w-1 bg-red-600 shrink-0" />
-                      <div className="bg-black/90 px-2 py-1.5 flex-1 min-w-0">
-                        {gcLine1 && <div className="text-white font-bold text-[10px] uppercase tracking-wide leading-tight truncate">{gcLine1}</div>}
-                        {gcLine2 && <div className="text-zinc-400 text-[8px] uppercase tracking-widest truncate mt-0.5">{gcLine2}</div>}
+                  gcLayerConfig?.tarjaCustomPng ? (
+                    <div
+                      className="absolute z-40"
+                      style={{
+                        left: `${gcLayerConfig.tarjaX}%`,
+                        top: `${gcLayerConfig.tarjaY}%`,
+                        transform: "translate(-50%, -50%)",
+                        width: `${gcLayerConfig.tarjaScaleX}%`,
+                      }}
+                    >
+                      <div style={{ position: "relative", lineHeight: 0 }}>
+                        <img
+                          src={gcLayerConfig.tarjaCustomPng}
+                          alt="Tarja"
+                          style={{ width: "100%", display: "block", height: "auto" }}
+                        />
+                        {gcLine1 && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              left: `${gcLayerConfig.font1X}%`,
+                              top: `${gcLayerConfig.font1Y}%`,
+                              fontSize: gcLayerConfig.font1Size,
+                              fontWeight: 900,
+                              color: "#fff",
+                              textTransform: "uppercase",
+                              whiteSpace: "nowrap",
+                              textShadow: "0 1px 4px rgba(0,0,0,0.8)",
+                              transform: "translateY(-50%)",
+                              fontFamily: "sans-serif",
+                            }}
+                          >
+                            {gcLine1}
+                          </div>
+                        )}
+                        {gcLine2 && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              left: `${gcLayerConfig.font2X}%`,
+                              top: `${gcLayerConfig.font2Y}%`,
+                              fontSize: gcLayerConfig.font2Size,
+                              fontWeight: 500,
+                              color: "#d4d4d8",
+                              textTransform: "uppercase",
+                              whiteSpace: "nowrap",
+                              textShadow: "0 1px 4px rgba(0,0,0,0.8)",
+                              transform: "translateY(-50%)",
+                              fontFamily: "sans-serif",
+                            }}
+                          >
+                            {gcLine2}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="absolute bottom-0 left-0 right-0 z-40 px-2 pb-2 animate-in slide-in-from-bottom duration-300">
+                      <div className="flex items-stretch overflow-hidden rounded">
+                        <div className="w-1 bg-red-600 shrink-0" />
+                        <div className="bg-black/90 px-2 py-1.5 flex-1 min-w-0">
+                          {gcLine1 && <div className="text-white font-bold text-[10px] uppercase tracking-wide leading-tight truncate">{gcLine1}</div>}
+                          {gcLine2 && <div className="text-zinc-400 text-[8px] uppercase tracking-widest truncate mt-0.5">{gcLine2}</div>}
+                        </div>
+                      </div>
+                    </div>
+                  )
                 )}
                 {/* TARJA Overlay */}
                 {tarjaVisible && (
@@ -3575,37 +3739,12 @@ function PlayoutPage() {
                   <Grid2X2 className="h-2.5 w-2.5" />Multi
                 </button>
               </div>
-              {/* Botões CAM 1-4 — visíveis só no modo MULTI */}
-              {multiviewActive && (
-                <div className="flex items-center gap-1.5 mt-1">
-                  {[1, 2, 3, 4].map((cam) => (
-                    <button
-                      key={cam}
-                      onClick={() => {
-                        setActiveCam(cam);
-                        sendCamToPreview(cam - 1);
-                        if (pgmChannelRef.current?.readyState === 1) {
-                          pgmChannelRef.current.send(JSON.stringify({ type: "cam_take", cam }));
-                        }
-                        toast.success(`CAM ${cam} → PREVIEW`);
-                      }}
-                      className="flex-1 px-2 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border transition-all active:scale-[0.97]"
-                      style={{
-                        backgroundColor: activeCam === cam ? '#f97316' : '#00E676',
-                        borderColor: activeCam === cam ? '#fb923c' : '#00E67650',
-                        color: '#000',
-                      }}
-                    >
-                      CAM {cam}
-                    </button>
-                  ))}
-                </div>
-              )}
+
             </div>
           </div>
 
-          {/* ── LAUDA | Transport | GC | Vaga + Empty Cols ── */}
-          <div className="grid grid-cols-[auto_1fr_auto_1fr_auto_auto] gap-0 flex-1 min-h-0">
+          {/* ── LAUDA | Transport+GC | Switcher (expandido) ── */}
+          <div className="grid grid-cols-[auto_1fr_auto] gap-0 flex-1 min-h-0">
 
             {/* ─ Col 1: LAUDA ─ */}
             <div
@@ -3728,8 +3867,11 @@ function PlayoutPage() {
               </div>
             </div>
 
-            {/* ─ Transport Controls ─ */}
-            <div className="border rounded-xl p-4 flex flex-col gap-3 w-[380px]" style={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a' }}>
+            {/* ─ Transport Controls + GC Panel (lado a lado) ─ */}
+            <div className="flex flex-row gap-2 min-h-0 overflow-hidden">
+
+            {/* Transport Controls */}
+            <div className="border rounded-xl p-4 flex flex-col gap-3 shrink-0" style={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a', width: 320 }}>
               {/* Barra de progresso */}
               <div className="flex items-center gap-2">
                 <span ref={progressTimeRef} className="text-[9px] font-mono text-zinc-600 w-8 text-right tabular-nums">{formatDuration(pgmCurrentTime)}</span>
@@ -3785,122 +3927,10 @@ function PlayoutPage() {
                 </button>
               </div>
 
-              {/* TRANS slider */}
-              <div className="border-t pt-3 flex flex-col gap-2" style={{ borderColor: '#2a2a2a' }}>
-                <div className="flex items-center justify-between px-1">
-                  <span className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-400">
-                    ⚙ TRANSIÇÃO
-                  </span>
-                  <span className="text-[10px] font-mono font-bold" style={{ color: transValue > 0 ? '#facc15' : '#52525b' }}>
-                    {transValue}%
-                  </span>
-                </div>
-                <div
-                  className="relative flex items-center w-full rounded-xl overflow-hidden"
-                  style={{ height: 48, cursor: "ew-resize", backgroundColor: '#0a0a0a', border: '1px solid #2a2a2a' }}
-                  onMouseDown={(e) => {
-                    handleTransition();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const onMove = (ev: MouseEvent) => {
-                      const pct = Math.min(100, Math.max(0, ((ev.clientX - rect.left) / rect.width) * 100));
-                      setTransValue(Math.round(pct));
-                      applyTransOpacity(Math.round(pct), activePlayer);
-                    };
-                    const onUp = (ev: MouseEvent) => {
-                      const pct = Math.min(100, Math.max(0, ((ev.clientX - rect.left) / rect.width) * 100));
-                      window.removeEventListener("mousemove", onMove);
-                      window.removeEventListener("mouseup", onUp);
-                      if (pct >= 95) {
-                        handleTransComplete();
-                      } else {
-                        setTransValue(0);
-                        setPlayerAOpacity(activePlayer === "A" ? 1 : 0);
-                        setPlayerAZ(activePlayer === "A" ? 10 : 0);
-                        setPlayerBOpacity(activePlayer === "B" ? 1 : 0);
-                        setPlayerBZ(activePlayer === "B" ? 10 : 0);
-                        const inactiveEl = activePlayer === "A" ? pgmBRef.current : pgmARef.current;
-                        if (inactiveEl) { inactiveEl.pause(); inactiveEl.src = ""; }
-                      }
-                    };
-                    window.addEventListener("mousemove", onMove);
-                    window.addEventListener("mouseup", onUp);
-                  }}
-                  onTouchStart={(e) => {
-                    handleTransition();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const onMove = (ev: TouchEvent) => {
-                      const touch = ev.touches[0];
-                      const pct = Math.min(100, Math.max(0, ((touch.clientX - rect.left) / rect.width) * 100));
-                      setTransValue(Math.round(pct));
-                      applyTransOpacity(Math.round(pct), activePlayer);
-                    };
-                    const onEnd = (ev: TouchEvent) => {
-                      const touch = ev.changedTouches[0];
-                      const pct = Math.min(100, Math.max(0, ((touch.clientX - rect.left) / rect.width) * 100));
-                      window.removeEventListener("touchmove", onMove);
-                      window.removeEventListener("touchend", onEnd);
-                      if (pct >= 95) {
-                        handleTransComplete();
-                      } else {
-                        setTransValue(0);
-                        setPlayerAOpacity(activePlayer === "A" ? 1 : 0);
-                        setPlayerAZ(activePlayer === "A" ? 10 : 0);
-                        setPlayerBOpacity(activePlayer === "B" ? 1 : 0);
-                        setPlayerBZ(activePlayer === "B" ? 10 : 0);
-                        const inactiveEl = activePlayer === "A" ? pgmBRef.current : pgmARef.current;
-                        if (inactiveEl) { inactiveEl.pause(); inactiveEl.src = ""; }
-                      }
-                    };
-                    window.addEventListener("touchmove", onMove);
-                    window.addEventListener("touchend", onEnd);
-                  }}
-                  title="Arraste para fazer fusão — solte no fim para confirmar"
-                >
-                  {/* trilho base */}
-                  <div className="absolute inset-x-0" style={{ top: "50%", transform: "translateY(-50%)", height: 3, background: "#27272a" }} />
-                  {/* trilho preenchido: azul (PGM) → verde (transição) */}
-                  <div
-                    className="absolute"
-                    style={{
-                      left: 0, top: "50%", transform: "translateY(-50%)", height: 3,
-                      width: `${transValue}%`,
-                      background: "linear-gradient(90deg, #3b82f6, #00E676)",
-                      boxShadow: transValue > 0 ? "0 0 8px rgba(0,230,118,0.6)" : "none",
-                    }}
-                  />
-                  {[25, 50, 75].map((tick) => (
-                    <div key={tick} className="absolute" style={{ left: `${tick}%`, top: "50%", transform: "translate(-50%, -50%)", width: 1, height: 14, background: "rgba(255,255,255,0.12)" }} />
-                  ))}
-                  {/* knob "play" */}
-                  <div
-                    className="absolute rounded-full flex items-center justify-center transition-shadow"
-                    style={{
-                      left: `${transValue}%`, top: "50%", transform: "translate(-50%, -50%)",
-                      width: 34, height: 34, zIndex: 10,
-                      background: transValue > 0
-                        ? "radial-gradient(circle at 35% 35%, #60a5fa, #2563eb)"
-                        : "radial-gradient(circle at 35% 35%, #52525b, #27272a)",
-                      boxShadow: transValue > 0 ? "0 0 16px rgba(37,99,235,0.7)" : "0 2px 6px rgba(0,0,0,0.5)",
-                      border: "2px solid rgba(255,255,255,0.15)",
-                    }}
-                  >
-                    <Play className="h-3.5 w-3.5 text-white fill-white" />
-                  </div>
-                </div>
-                <div className="flex justify-between px-1">
-                  <span className="text-[8px] font-mono font-bold" style={{ color: '#3b82f6' }}>PGM</span>
-                  <span className="text-[8px] font-mono font-bold text-zinc-600">PVW</span>
-                </div>
-                {transValue > 0 && (
-                  <p className="text-center text-[9px] font-mono" style={{ color: '#00E676' }}>
-                    Transição ativa: {transValue}% — Solte em 95%+ para confirmar
-                  </p>
-                )}
-              </div>
-            </div>
 
-            {/* ── MONITOR DE TIMELINE DE CRÉDITOS ── */}
-            {materiaAtual && sonorasTimeline.length > 0 && pgmFile?.duration && (
+
+              {/* ── MONITOR DE TIMELINE DE CRÉDITOS ── */}
+              {materiaAtual && sonorasTimeline.length > 0 && pgmFile?.duration && (
               <div className="border rounded-xl p-3 flex flex-col gap-2 mt-0" style={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a' }}>
                 <div className="flex items-center justify-between pb-1 border-b" style={{ borderColor: '#2a2a2a' }}>
                   <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#00E676' }}>⏱ TIMELINE VT</span>
@@ -3983,143 +4013,32 @@ function PlayoutPage() {
                 </div>
               </div>
             )}
-            <div className="flex flex-col gap-3 w-[480px] overflow-y-auto" style={{ backgroundColor: '#121212' }}>
-              {/* GC GERADOR */}
-              <div className="border rounded-xl p-3 flex flex-col gap-3" style={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a' }}>
-                <div className="flex items-center gap-2">
-                  <Type className="h-3 w-3 text-zinc-500" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">GC — Gerador</span>
-            </div>
+            </div>{/* end Transport Controls */}
 
-            {/* Campos + Preview */}
-            <div className="grid grid-cols-[2fr_1fr] gap-2">
-              <div className="flex flex-col gap-1.5">
-                <div className="flex flex-col gap-0.5">
-                  <label className="text-[8px] uppercase tracking-widest text-zinc-600">Linha 1 — Nome</label>
-                  <input type="text" value={gcLine1} onChange={(e) => setGcLine1(e.target.value)}
-                    placeholder="Nome / Título"
-                    className="w-full border rounded px-2 py-1 text-[10px] font-mono text-zinc-200 placeholder:text-zinc-700 focus:outline-none transition-all"
-                    style={{ backgroundColor: '#252525', borderColor: '#333' }}
-                  />
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <label className="text-[8px] uppercase tracking-widest text-zinc-600">Linha 2 — Cargo</label>
-                  <input type="text" value={gcLine2} onChange={(e) => setGcLine2(e.target.value)}
-                    placeholder="Cargo / Informação"
-                    className="w-full border rounded px-2 py-1 text-[10px] font-mono text-zinc-200 placeholder:text-zinc-700 focus:outline-none transition-all"
-                    style={{ backgroundColor: '#252525', borderColor: '#333' }}
-                  />
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <label className="text-[8px] uppercase tracking-widest text-zinc-600 shrink-0">Dur.:</label>
-                  <select value={gcDuration} onChange={(e) => setGcDuration(Number(e.target.value))}
-                    className="flex-1 border rounded px-1.5 py-1 text-[9px] font-mono text-zinc-200 focus:outline-none transition-all"
-                    style={{ backgroundColor: '#252525', borderColor: '#333' }}>
-                    <option value={0}>Manual</option>
-                    <option value={3}>3s</option>
-                    <option value={5}>5s</option>
-                    <option value={10}>10s</option>
-                  </select>
-                </div>
-              </div>
-              {/* Preview miniatura */}
-              <div className="relative w-full aspect-video bg-black rounded border border-zinc-800 overflow-hidden">
-                <div className="absolute inset-0 flex items-center justify-center text-zinc-800 text-[6px] uppercase tracking-widest">GC Prev</div>
-                {(gcLine1 || gcLine2) ? (
-                  <div className="absolute bottom-0 left-0 right-0 px-0.5 pb-0.5">
-                    <div className="flex items-stretch overflow-hidden rounded-sm">
-                      <div className="w-0.5 bg-red-600 shrink-0" />
-                      <div className="bg-black/90 px-1 py-0.5 flex-1 min-w-0">
-                        {gcLine1 && <div className="text-white font-bold text-[6px] uppercase truncate">{gcLine1}</div>}
-                        {gcLine2 && <div className="text-zinc-400 text-[5px] uppercase truncate">{gcLine2}</div>}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-
-            {/* Botões GC */}
-            <div className="flex gap-1.5">
-              <button onClick={handleGcTakeQueue}
-                className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border text-[9px] font-bold uppercase tracking-widest text-white transition-all active:scale-[0.98]"
-                style={{ backgroundColor: '#00E67620', borderColor: '#00E67640', color: '#00E676' }}>
-                GC TAKE
-              </button>
-              <button onClick={handleGcClear}
-                className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border border-red-500/30 text-[9px] font-bold uppercase tracking-widest text-red-400 transition-all active:scale-[0.98]"
-                style={{ backgroundColor: '#ef444420' }}>
-                GC CLR
-              </button>
-              <button onClick={handleGcSkip} disabled={gcCreditsQueue.length === 0}
-                className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border border-zinc-600 text-[9px] font-bold uppercase tracking-widest text-zinc-400 transition-all active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed"
-                style={{ backgroundColor: '#252525' }}>
-                PULAR
-              </button>
-              <button onClick={() => setGcPanelOpen(true)}
-                className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border text-[9px] font-bold uppercase tracking-widest transition-all active:scale-[0.98]"
-                style={{ backgroundColor: '#7c3aed20', borderColor: '#7c3aed40', color: '#c084fc' }}>
-                <Sliders className="h-3 w-3" />
-                Personalizar
-              </button>
-            </div>
-
-            {/* Presets */}
-            <div className="border-t pt-2 flex flex-col gap-1.5" style={{ borderColor: '#2a2a2a' }}>
-              <label className="text-[8px] uppercase tracking-widest text-zinc-600">Presets Rápidos:</label>
-              <div className="flex flex-col gap-1">
-                {Object.keys(gcPresets).map((presetName) => (
-                  <button key={presetName} onClick={() => handleApplyPreset(presetName)}
-                    className="w-full px-2 py-1 rounded text-[8px] font-bold uppercase tracking-widest border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-all active:scale-95"
-                    style={{ backgroundColor: '#252525' }}>
-                    {presetName}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+            {/* GC Panel — colado à direita do Transport */}
+            <div className="flex flex-col gap-2 overflow-y-auto" style={{ backgroundColor: '#121212', width: 400, minWidth: 400 }}>
+              {/* GC — Gerador de Caracteres (fixo, inline) */}
+              <GcPanel
+                gcLine1={gcLine1}
+                setGcLine1={setGcLine1}
+                gcLine2={gcLine2}
+                setGcLine2={setGcLine2}
+                gcDuration={gcDuration}
+                setGcDuration={setGcDuration}
+                gcVisible={gcVisible}
+                setGcVisible={setGcVisible}
+                gcCreditsQueue={gcCreditsQueue}
+                onTake={handleGcTakeQueue}
+                onClear={handleGcClear}
+                onSkip={handleGcSkip}
+                onLayerChange={handleGcLayerChange}
+              />
 
           {/* ── AJUSTES & EFEITOS ── */}
           <div className="border rounded-xl p-3 flex flex-col gap-3" style={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a' }}>
             <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">⚙️ AJUSTES & EFEITOS</span>
 
-            <div className="grid grid-cols-2 gap-2">
-              {/* Botão TARJA */}
-              <button onClick={() => setTarjaPanelOpen((v) => !v)}
-                className={cn(
-                  "flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl border text-[9px] font-bold uppercase tracking-widest transition-all active:scale-[0.98]",
-                  tarjaPanelOpen ? "border-zinc-500 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
-                )}
-                style={{ backgroundColor: tarjaPanelOpen ? '#3f3f46' : '#252525' }}
-                title="Abrir controles da tarja">
-                🎞 TARJA
-              </button>
-
-              {/* Botão TARJA ON/OFF */}
-              <button
-                onClick={() => {
-                  const next = !tarjaVisible;
-                  setTarjaVisible(next);
-                  pgmChannelRef.current?.readyState === 1 && pgmChannelRef.current.send(JSON.stringify({ type: next ? "tarja_show" : "tarja_hide" }));
-                }}
-                className={cn(
-                  "flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl border text-[9px] font-bold uppercase tracking-widest transition-all active:scale-[0.98]"
-                )}
-                style={{
-                  backgroundColor: tarjaVisible ? '#00E67620' : '#252525',
-                  borderColor: tarjaVisible ? '#00E67640' : '#3f3f46',
-                  color: tarjaVisible ? '#00E676' : '#71717a',
-                }}>
-                {tarjaVisible ? "● TARJA ON" : "○ TARJA OFF"}
-              </button>
-
-              {/* Placeholder */}
-              <button disabled
-                className="flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl border border-zinc-800 text-[9px] font-bold text-zinc-700 transition-all opacity-40 cursor-default"
-                style={{ backgroundColor: '#1a1a1a' }}>
-                —
-              </button>
-
+            <div className="flex gap-2">
               {/* GC ERASE ALL */}
               <button
                 onClick={() => {
@@ -4136,7 +4055,7 @@ function PlayoutPage() {
                     setLastClickTime(now);
                   }
                 }}
-                className="flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl border border-red-500/20 text-[9px] font-bold uppercase text-red-400 transition-all active:scale-[0.98]"
+                className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl border border-red-500/20 text-[9px] font-bold uppercase text-red-400 transition-all active:scale-[0.98]"
                 style={{ backgroundColor: '#7f1d1d30' }}
                 title="Clique 2x para deletar toda a lauda">
                 🗑️ ERASE
@@ -4144,75 +4063,387 @@ function PlayoutPage() {
             </div>
           </div>
 
-          {/* ── FRAMES & OVERLAY (Módulo ME) ── */}
-          <div className="border rounded-xl p-3 flex flex-col gap-2" style={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a' }}>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">🖼️ FRAMES & OVERLAY</span>
-            <div className="grid grid-cols-4 gap-2 p-3 bg-[#1a1a1a] rounded border border-[#2a2a2a]">
-              {[0, 1, 2, 3].map((id) => (
-                <button
-                  key={id}
-                  onClick={() => handleMeFrameClick(id)}
-                  className={cn(
-                    "aspect-square bg-[#121212] border-2 rounded flex flex-col items-center justify-center transition-all group overflow-hidden relative",
-                    meActiveFrame === id ? "border-[#00E676] shadow-[0_0_12px_rgba(0,230,118,0.5)]" : "border-[#2a2a2a] hover:border-[#00E676]"
-                  )}
-                  title={meFrames[id] ? `FRAME ${id + 1}` : "Carregar PNG"}
-                >
-                  {meFrames[id] ? (
-                    <>
-                      <img src={meFrames[id] as string} alt={`Frame ${id + 1}`} className="absolute inset-0 w-full h-full object-contain p-1" />
+
+
+            </div>{/* end GC Panel column */}
+            </div>{/* end Transport+GC flex-row wrapper */}
+
+            {/* ══════════════════════════════════════════
+                 SWITCHER / MESA DE CORTE — Painel Expandido (3 colunas)
+                ══════════════════════════════════════════ */}
+            <div
+              className="border rounded-xl flex flex-col overflow-hidden"
+              style={{ backgroundColor: '#111', borderColor: '#222', minWidth: 820, maxWidth: 960 }}
+            >
+              {/* ── CABEÇALHO ── */}
+              <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: '#222', background: 'linear-gradient(90deg,#0a0a0a,#181818)' }}>
+                <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#00E676' }}>⬡ SWITCHER</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[8px] font-mono px-1.5 py-0.5 rounded" style={{ backgroundColor: '#ef444420', color: '#ef4444', border: '1px solid #ef444440' }}>PGM</span>
+                  <span className="text-[8px] font-mono px-1.5 py-0.5 rounded" style={{ backgroundColor: '#3b82f620', color: '#3b82f6', border: '1px solid #3b82f640' }}>PVW</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-[230px_1fr_1fr] gap-0 flex-1 min-h-0">
+
+                {/* ── COLUNA 1 — TRANSIÇÃO / T-BAR / AUTO ── */}
+                <div className="flex flex-col gap-0 px-3 py-3 border-r overflow-y-auto" style={{ borderColor: '#1e1e1e' }}>
+                {/* ── 1. TRANSITION TYPE — CUT / DISSOLVE / WIPE ── */}
+                <div className="flex flex-col gap-1 mb-2">
+                  <span className="text-[8px] font-black uppercase tracking-widest text-zinc-600 px-0.5">Tipo de Transição</span>
+                  <div className="flex gap-1">
+                    {([
+                      { key: "cut",     label: "✂ CUT",      bg: '#facc15', fg: '#000', glow: 'rgba(250,204,21,0.35)' },
+                      { key: "dissolve",label: "◎ MIX",      bg: '#8b5cf6', fg: '#fff', glow: 'rgba(139,92,246,0.35)' },
+                      { key: "wipe",    label: "▷ WIPE",     bg: '#0ea5e9', fg: '#fff', glow: 'rgba(14,165,233,0.35)' },
+                    ] as const).map(({ key, label, bg, fg, glow }) => (
                       <button
-                        onClick={(e) => handleMeFrameClear(id, e)}
-                        title="Remover imagem"
-                        className="absolute top-0.5 right-0.5 z-20 flex items-center justify-center w-4 h-4 rounded-full bg-black/70 border border-zinc-600 text-zinc-400 hover:text-red-400 hover:border-red-400 transition-all"
-                      >
-                        <X className="h-2.5 w-2.5" />
-                      </button>
-                    </>
-                  ) : (
-                    <ImageIcon className="text-slate-600 group-hover:text-[#00E676]" size={18} />
+                        key={key}
+                        onClick={() => setTransitionType(key)}
+                        className="flex-1 py-1.5 rounded text-[8px] font-black uppercase tracking-widest border transition-all active:scale-[0.97]"
+                        style={{
+                          backgroundColor: transitionType === key ? bg : '#1a1a1a',
+                          borderColor: transitionType === key ? bg : '#2a2a2a',
+                          color: transitionType === key ? fg : '#52525b',
+                          boxShadow: transitionType === key ? `0 0 8px ${glow}` : 'none',
+                        }}
+                      >{label}</button>
+                    ))}
+                  </div>
+
+                  {/* WIPE directions */}
+                  {transitionType === "wipe" && (
+                    <div className="grid grid-cols-6 gap-0.5 mt-0.5">
+                      {["→","←","↓","↑","⬋","⬊"].map((dir, i) => (
+                        <button key={i} onClick={() => setWipeDirIdx(i)}
+                          className="py-1 rounded text-[10px] font-black border transition-all"
+                          style={{
+                            backgroundColor: wipeDirIdx === i ? '#0ea5e9' : '#1a1a1a',
+                            borderColor: wipeDirIdx === i ? '#0ea5e9' : '#2a2a2a',
+                            color: wipeDirIdx === i ? '#fff' : '#52525b',
+                          }}
+                        >{dir}</button>
+                      ))}
+                    </div>
                   )}
-                  <span className={cn(
-                    "text-[9px] mt-1 z-10 px-1 rounded",
-                    meActiveFrame === id ? "text-[#00E676] font-bold bg-black/60" : "text-slate-500 bg-black/60"
-                  )}>
-                    FRAME {id + 1}
-                  </span>
-                  <input
-                    ref={(el) => { meFileInputRefs.current[id] = el; }}
-                    type="file" accept="image/png" className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleMeFrameLoad(id, file);
-                      e.target.value = "";
-                    }}
-                  />
-                </button>
-              ))}
-            </div>
-          </div>
+                </div>
 
-            {/* ─ Col 3: GC - Gerador ─ */}
-            <div className="border rounded-xl p-3 flex flex-col overflow-hidden" style={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a' }}>
-              <div className="pb-2 border-b-2 border-zinc-700 mb-3 flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">— VAGA</span>
-              </div>
-              <div className="flex-1 flex flex-col items-center justify-center gap-2 border-2 border-dashed border-white/5 rounded-xl">
-                <span className="text-[10px] uppercase tracking-widest text-center px-3 text-zinc-700">Disponível</span>
-              </div>
-            </div>
+                {/* ── 2. T-BAR + AUTO TRANS ── */}
+                <div className="flex gap-2 items-stretch mb-2">
 
-            {/* ─ Empty Col 1 ─ */}
-            <div className="border rounded-xl p-3 flex flex-col overflow-hidden" style={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a' }}>
-              <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-white/5 rounded-xl">
-              </div>
-            </div>
+                  {/* T-BAR vertical */}
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span className="text-[7px] font-black uppercase tracking-widest text-zinc-600">PVW</span>
+                    <div
+                      className="relative flex flex-col items-center select-none"
+                      style={{ width: 48, height: 120, cursor: transitionType === "cut" ? "pointer" : "ns-resize" }}
+                      title={transitionType === "cut" ? "Clique para CUT" : "Arraste — solte ≥95% para confirmar"}
+                      onMouseDown={(e) => {
+                        if (transitionType === "cut") { handleTransition(); handleTransComplete(); return; }
+                        handleTransition();
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const onMove = (ev: MouseEvent) => {
+                          const pct = Math.min(100, Math.max(0, ((ev.clientY - rect.top) / rect.height) * 100));
+                          setTransValue(Math.round(pct));
+                          applyTransOpacity(Math.round(pct), activePlayer);
+                        };
+                        const onUp = (ev: MouseEvent) => {
+                          const pct = Math.min(100, Math.max(0, ((ev.clientY - rect.top) / rect.height) * 100));
+                          window.removeEventListener("mousemove", onMove);
+                          window.removeEventListener("mouseup", onUp);
+                          if (pct >= 95) { handleTransComplete(); }
+                          else {
+                            setTransValue(0);
+                            setPlayerAOpacity(activePlayer === "A" ? 1 : 0); setPlayerAZ(activePlayer === "A" ? 10 : 0);
+                            setPlayerBOpacity(activePlayer === "B" ? 1 : 0); setPlayerBZ(activePlayer === "B" ? 10 : 0);
+                            const inactiveEl = activePlayer === "A" ? pgmBRef.current : pgmARef.current;
+                            if (inactiveEl) { inactiveEl.pause(); inactiveEl.src = ""; }
+                          }
+                        };
+                        window.addEventListener("mousemove", onMove);
+                        window.addEventListener("mouseup", onUp);
+                      }}
+                    >
+                      {/* chassis */}
+                      <div className="absolute inset-x-0 rounded-lg" style={{ top:0, bottom:0, background:'linear-gradient(90deg,#0d0d0d,#1c1c1c,#0d0d0d)', border:'2px solid #2a2a2a', boxShadow:'inset 0 2px 8px rgba(0,0,0,0.9)' }} />
+                      {/* groove */}
+                      <div className="absolute rounded-full" style={{ left:'50%', transform:'translateX(-50%)', top:8, bottom:8, width:4, background:'linear-gradient(180deg,#050505,#1e1e1e 50%,#050505)', boxShadow:'inset 0 1px 4px rgba(0,0,0,1)' }} />
+                      {/* fill */}
+                      <div className="absolute rounded-full transition-none" style={{
+                        left:'50%', transform:'translateX(-50%)', bottom:8, width:4,
+                        height: transValue > 0 ? `calc(${transValue}% - 8px)` : 0,
+                        background: transitionType==="dissolve" ? 'linear-gradient(0deg,#7c3aed,#c4b5fd)' : transitionType==="wipe" ? 'linear-gradient(0deg,#0284c7,#7dd3fc)' : 'linear-gradient(0deg,#facc15,#fef08a)',
+                        boxShadow: transValue > 0 ? (transitionType==="dissolve" ? '0 0 6px rgba(139,92,246,0.8)' : transitionType==="wipe" ? '0 0 6px rgba(14,165,233,0.8)' : '0 0 6px rgba(250,204,21,0.8)') : 'none',
+                      }} />
+                      {/* ticks */}
+                      {[25,50,75].map(t => (
+                        <div key={t} className="absolute" style={{ left:'50%', transform:'translateX(-50%)', top:`${t}%`, width:14, height:1, background:'rgba(255,255,255,0.07)' }} />
+                      ))}
+                      {/* knob */}
+                      <div className="absolute z-10" style={{
+                        top:`calc(${transValue}% - 15px)`, left:'50%', transform:'translateX(-50%)',
+                        width:40, height:30, borderRadius:5,
+                        background:'linear-gradient(180deg,#4a4a4a 0%,#d6d6d6 30%,#a0a0a0 50%,#6a6a6a 70%,#333 100%)',
+                        border:'1px solid #6a6a6a',
+                        boxShadow:'0 3px 10px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.25), inset 0 -1px 0 rgba(0,0,0,0.6)',
+                      }}>
+                        {[0,1,2,3].map(i => <div key={i} className="absolute" style={{ top:`${9+i*3}px`, left:5, right:5, height:1, background:'rgba(0,0,0,0.3)' }} />)}
+                        <div className="absolute" style={{
+                          top:'50%', left:7, right:7, height:2, transform:'translateY(-50%)', borderRadius:1,
+                          background: transitionType==="dissolve" ? '#a78bfa' : transitionType==="wipe" ? '#7dd3fc' : '#facc15',
+                          boxShadow: transitionType==="dissolve" ? '0 0 4px rgba(167,139,250,1)' : transitionType==="wipe" ? '0 0 4px rgba(125,211,252,1)' : '0 0 4px rgba(250,204,21,1)',
+                        }} />
+                      </div>
+                    </div>
+                    <span className="text-[7px] font-black uppercase tracking-widest text-zinc-600">PGM</span>
+                    <span className="text-[7px] font-mono text-center" style={{ color: transValue > 0 ? '#facc15' : '#3f3f46' }}>
+                      {transValue > 0 ? (transValue >= 95 ? "✓ OK" : `${transValue}%`) : "—"}
+                    </span>
+                  </div>
 
-            {/* ─ Empty Col 2 ─ */}
-            <div className="border rounded-xl p-3 flex flex-col overflow-hidden" style={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a' }}>
-              <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-white/5 rounded-xl">
+                  {/* AUTO TRANS control */}
+                  <div className="flex flex-col gap-1.5 flex-1">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[7px] font-black uppercase tracking-widest text-zinc-600">Duração Auto</span>
+                      <div className="flex gap-1">
+                        {[15, 30, 60, 90].map((f) => (
+                          <button key={f} onClick={() => setAutoTransDur(f)}
+                            className="flex-1 py-1 rounded text-[7px] font-black border transition-all"
+                            style={{
+                              backgroundColor: autoTransDur === f ? '#1d4ed8' : '#1a1a1a',
+                              borderColor: autoTransDur === f ? '#3b82f6' : '#2a2a2a',
+                              color: autoTransDur === f ? '#93c5fd' : '#52525b',
+                            }}
+                          >{f === 15 ? '½s' : f === 30 ? '1s' : f === 60 ? '2s' : '3s'}</button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* AUTO button */}
+                    <button
+                      onClick={handleAutoTrans}
+                      disabled={autoTransRunning}
+                      className="w-full py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all active:scale-[0.97] disabled:opacity-50"
+                      style={{
+                        background: autoTransRunning
+                          ? 'linear-gradient(135deg,#1d4ed8,#2563eb)'
+                          : 'linear-gradient(135deg,#1e3a8a,#1d4ed8)',
+                        borderColor: '#3b82f6',
+                        color: '#93c5fd',
+                        boxShadow: autoTransRunning ? '0 0 16px rgba(59,130,246,0.6)' : '0 0 8px rgba(59,130,246,0.2)',
+                      }}
+                    >
+                      {autoTransRunning ? `⟳ ${transValue}%` : '▶ AUTO'}
+                    </button>
+
+                    {/* FTB — Fade to Black */}
+                    <button
+                      onClick={() => {
+                        if (pgmChannelRef.current?.readyState === 1)
+                          pgmChannelRef.current.send(JSON.stringify({ type: "ftb" }));
+                        toast("⬛ Fade to Black");
+                      }}
+                      className="w-full py-1.5 rounded text-[8px] font-black uppercase tracking-widest border transition-all active:scale-[0.97]"
+                      style={{ backgroundColor: '#0a0a0a', borderColor: '#3f3f46', color: '#71717a', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}
+                    >⬛ FTB</button>
+
+                    {/* FREEZE */}
+                    <button
+                      onClick={() => {
+                        const el = activePlayer === "A" ? pgmARef.current : pgmBRef.current;
+                        if (el) { el.paused ? el.play() : el.pause(); }
+                        toast("🧊 FREEZE");
+                      }}
+                      className="w-full py-1.5 rounded text-[8px] font-black uppercase tracking-widest border transition-all active:scale-[0.97]"
+                      style={{ backgroundColor: '#0c1a2e', borderColor: '#1e3a5f', color: '#60a5fa' }}
+                    >🧊 FREEZE</button>
+                  </div>
+                </div>
+                </div>
+
+                {/* ── COLUNA 2 — BUS DE CÂMERAS + DSK ── */}
+                <div className="flex flex-col gap-0 px-3 py-3 border-r overflow-y-auto" style={{ borderColor: '#1e1e1e' }}>
+                {/* ── 3. CAM BUS — PVW row + PGM row ── */}
+                {multiviewActive && (
+                <div className="flex flex-col gap-1.5 mb-3">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="text-[7px] font-black uppercase tracking-widest text-zinc-600 flex-1">Bus de Câmeras</span>
+                  </div>
+                  {/* labels */}
+                  <div className="grid grid-cols-5 gap-1 text-center">
+                    {["CAM 1","CAM 2","CAM 3","CAM 4","BLACK"].map((label) => (
+                      <span key={label} className="text-[6px] font-black uppercase text-zinc-700 truncate">{label}</span>
+                    ))}
+                  </div>
+                  {/* PVW row */}
+                  <div className="grid grid-cols-5 gap-1">
+                    {(["cam1","cam2","cam3","cam4","black"] as const).map((src, i) => (
+                      <button key={src}
+                        onClick={() => {
+                          setPvwBus(src);
+                          if (src !== "black") { sendCamToPreview(i); toast.success(`PVW → ${src.toUpperCase()}`); }
+                        }}
+                        className="py-1.5 rounded text-[7px] font-black border transition-all active:scale-[0.97]"
+                        style={{
+                          backgroundColor: pvwBus === src ? '#1d4ed8' : '#1a1a1a',
+                          borderColor: pvwBus === src ? '#3b82f6' : '#2a2a2a',
+                          color: pvwBus === src ? '#fff' : '#52525b',
+                          boxShadow: pvwBus === src ? '0 0 6px rgba(59,130,246,0.5)' : 'none',
+                        }}
+                      >{src === "black" ? "⬛" : `${i+1}`}</button>
+                    ))}
+                  </div>
+                  {/* PGM row */}
+                  <div className="grid grid-cols-5 gap-1">
+                    {(["cam1","cam2","cam3","cam4","black"] as const).map((src, i) => (
+                      <button key={src}
+                        onClick={() => {
+                          setPgmBus(src);
+                          setActiveCam(src !== "black" ? i + 1 : null);
+                          if (src !== "black" && pgmChannelRef.current?.readyState === 1)
+                            pgmChannelRef.current.send(JSON.stringify({ type: "cam_take", cam: i + 1 }));
+                          toast.success(`PGM → ${src.toUpperCase()}`);
+                        }}
+                        className="py-1.5 rounded text-[7px] font-black border transition-all active:scale-[0.97]"
+                        style={{
+                          backgroundColor: pgmBus === src ? '#dc2626' : '#1a1a1a',
+                          borderColor: pgmBus === src ? '#ef4444' : '#2a2a2a',
+                          color: pgmBus === src ? '#fff' : '#52525b',
+                          boxShadow: pgmBus === src ? '0 0 8px rgba(220,38,38,0.6)' : 'none',
+                        }}
+                      >{src === "black" ? "⬛" : `${i+1}`}</button>
+                    ))}
+                  </div>
+                  <div className="flex justify-between px-0.5">
+                    <span className="text-[6px] font-mono text-blue-500/60 uppercase">PVW</span>
+                    <span className="text-[6px] font-mono text-red-500/60 uppercase">PGM</span>
+                  </div>
+                </div>
+                )}
+
+                  <div className="border-t pt-3 mt-1" style={{ borderColor: '#222' }}>
+                {/* ── 4. DSK — Downstream Keyer ── */}
+                <div className="flex flex-col gap-1 mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 flex-1">DSK — Downstream Keyer</span>
+                    <span className={cn("text-[7px] font-black uppercase px-1.5 py-0.5 rounded border", dskActive ? "text-green-400 border-green-500/40 bg-green-500/10 animate-pulse" : "text-zinc-700 border-zinc-800 bg-zinc-900")}>
+                      {dskActive ? "ON AIR" : "OFF"}
+                    </span>
+                  </div>
+                  <div className="flex gap-1">
+                    {/* Load PNG */}
+                    <button
+                      onClick={() => dskFileInputRef.current?.click()}
+                      className="flex-1 py-1.5 rounded text-[8px] font-black uppercase border transition-all"
+                      style={{ backgroundColor: dskPng ? '#14532d30' : '#1a1a1a', borderColor: dskPng ? '#16a34a50' : '#2a2a2a', color: dskPng ? '#4ade80' : '#52525b' }}
+                    >{dskPng ? "✓ PNG" : "🖼 LOAD"}</button>
+                    <input ref={dskFileInputRef} type="file" accept="image/png" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDskLoad(f); e.target.value=""; }} />
+                    {/* ON / OFF */}
+                    <button
+                      onClick={() => {
+                        if (!dskPng) { toast.error("Carregue um PNG primeiro"); return; }
+                        setDskActive(v => !v);
+                        if (pgmChannelRef.current?.readyState === 1)
+                          pgmChannelRef.current.send(JSON.stringify({ type: dskActive ? "dsk_off" : "dsk_on", png: dskPng, opacity: dskOpacity }));
+                      }}
+                      className="flex-1 py-1.5 rounded text-[8px] font-black uppercase border transition-all active:scale-[0.97]"
+                      style={{
+                        backgroundColor: dskActive ? '#14532d' : '#1a1a1a',
+                        borderColor: dskActive ? '#22c55e' : '#3f3f46',
+                        color: dskActive ? '#4ade80' : '#71717a',
+                        boxShadow: dskActive ? '0 0 10px rgba(34,197,94,0.4)' : 'none',
+                      }}
+                    >{dskActive ? "▌▌ TAKE OFF" : "▶ TAKE ON"}</button>
+                    {/* clear */}
+                    {dskPng && (
+                      <button onClick={() => { setDskPng(null); setDskActive(false); }}
+                        className="px-2 rounded border border-red-500/20 text-red-500/60 text-[10px] transition-all hover:border-red-500/60 hover:text-red-400"
+                        style={{ backgroundColor: '#1a1a1a' }}
+                      ><X className="h-3 w-3" /></button>
+                    )}
+                  </div>
+                  {/* Opacity */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[7px] font-black uppercase text-zinc-700 shrink-0">Opacidade</span>
+                    <input type="range" min={0} max={100} value={dskOpacity}
+                      onChange={(e) => { const v = Number(e.target.value); setDskOpacity(v); if (pgmChannelRef.current?.readyState===1) pgmChannelRef.current.send(JSON.stringify({ type:"dsk_opacity", opacity: v })); }}
+                      className="flex-1 h-1 accent-green-500 cursor-pointer"
+                    />
+                    <span className="text-[7px] font-mono text-zinc-600 shrink-0 w-6 text-right">{dskOpacity}%</span>
+                  </div>
+                </div>
+                  </div>
+                </div>
+
+                {/* ── COLUNA 3 — FRAMES & OVERLAY (área anteriormente livre) ── */}
+                <div className="flex flex-col gap-0 px-3 py-3 overflow-y-auto">
+                {/* ── 5. FRAMES & OVERLAY — 4×2 grid ── */}
+                <div className="flex flex-col gap-1.5 mb-2">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500">🖼 Frames & Overlay</span>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[0, 1, 2, 3, 4, 5, 6, 7].map((id) => {
+                      const realId = id % 4;
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => { if (id < 4) handleMeFrameClick(id); else meFileInputRefs.current[realId]?.click(); }}
+                          className={cn(
+                            "aspect-square bg-[#0d0d0d] border-2 rounded-md flex flex-col items-center justify-center transition-all group overflow-hidden relative",
+                            id < 4
+                              ? (meActiveFrame === id ? "border-[#00E676] shadow-[0_0_8px_rgba(0,230,118,0.5)]" : "border-[#222] hover:border-[#00E67660]")
+                              : "border-[#1e1e1e] hover:border-[#3f3f46]"
+                          )}
+                          title={id < 4 ? (meFrames[id] ? `FRAME ${id+1} — clique para ativar/desativar` : `F${id+1}: Carregar PNG`) : `Slot extra ${id+1}`}
+                        >
+                          {id < 4 && meFrames[id] ? (
+                            <>
+                              <img src={meFrames[id] as string} alt="" className="absolute inset-0 w-full h-full object-contain p-0.5" />
+                              <button onClick={(e) => handleMeFrameClear(id, e)}
+                                className="absolute top-0 right-0 z-20 flex items-center justify-center w-3.5 h-3.5 rounded-bl bg-black/80 text-zinc-500 hover:text-red-400 transition-all">
+                                <X className="h-2 w-2" />
+                              </button>
+                            </>
+                          ) : (
+                            <ImageIcon className="text-zinc-800 group-hover:text-zinc-600 transition-colors" size={16} />
+                          )}
+                          <span className={cn(
+                            "text-[8px] z-10 font-black",
+                            id < 4 && meActiveFrame === id ? "text-[#00E676] bg-black/70 px-0.5 rounded" : "text-zinc-700"
+                          )}>
+                            {id < 4 ? `F${id+1}` : `S${id-3}`}
+                          </span>
+                          {id < 4 && (
+                            <input ref={(el) => { meFileInputRefs.current[id] = el; }} type="file" accept="image/png" className="hidden"
+                              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleMeFrameLoad(id, f); e.target.value=""; }} />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                  {/* espaço extra reaproveitado — resumo rápido do estado do switcher */}
+                  <div className="flex flex-col gap-1.5 mt-3 pt-3 border-t" style={{ borderColor: '#222' }}>
+                    <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Status</span>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div className="rounded-lg border px-2 py-1.5 flex flex-col gap-0.5" style={{ backgroundColor: '#0a0a0a', borderColor: '#222' }}>
+                        <span className="text-[7px] font-black uppercase text-zinc-600">Transição</span>
+                        <span className="text-[10px] font-black uppercase" style={{ color: transitionType === "dissolve" ? '#a78bfa' : transitionType === "wipe" ? '#7dd3fc' : '#facc15' }}>
+                          {transitionType === "dissolve" ? "MIX" : transitionType === "wipe" ? "WIPE" : "CUT"}
+                        </span>
+                      </div>
+                      <div className="rounded-lg border px-2 py-1.5 flex flex-col gap-0.5" style={{ backgroundColor: '#0a0a0a', borderColor: '#222' }}>
+                        <span className="text-[7px] font-black uppercase text-zinc-600">DSK</span>
+                        <span className="text-[10px] font-black uppercase" style={{ color: dskActive ? '#4ade80' : '#52525b' }}>
+                          {dskActive ? "ON AIR" : "OFF"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
               </div>
-            </div>
+            </div>{/* end SWITCHER col */}
 
           </div>
         </div>
@@ -4430,8 +4661,6 @@ function PlayoutPage() {
             </div>
           )}
 
-
-        </div>
       </div>
 
       <style
@@ -4449,26 +4678,7 @@ function PlayoutPage() {
         }}
       />
 
-      {/* ── GC Panel Flutuante ── */}
-      {gcPanelOpen && (
-        <GcPanel
-          open={gcPanelOpen}
-          onClose={() => setGcPanelOpen(false)}
-          gcLine1={gcLine1}
-          setGcLine1={setGcLine1}
-          gcLine2={gcLine2}
-          setGcLine2={setGcLine2}
-          gcDuration={gcDuration}
-          setGcDuration={setGcDuration}
-          gcVisible={gcVisible}
-          setGcVisible={setGcVisible}
-          gcCreditsQueue={gcCreditsQueue}
-          setGcCreditsQueue={setGcCreditsQueue}
-          onTake={handleGcTakeQueue}
-          onClear={handleGcClear}
-          onSkip={handleGcSkip}
-        />
-      )}
+      {/* GcPanel agora embutido inline na coluna direita */}
     </div>
   );
 }

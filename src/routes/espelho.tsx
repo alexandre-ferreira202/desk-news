@@ -507,6 +507,22 @@ function EspelhoPage() {
           </span>
           <div className="ml-auto flex items-center gap-2">
             {/* PASSO 6: Adicionado o monitorador silencioso do rascunho de backup na Toolbar */}
+            <a
+              href={`/tp?date=${date}&programa=${encodeURIComponent(programa ?? "")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-white text-[11px] font-semibold uppercase tracking-wider hover:border-[#22c55e] hover:ring-4 hover:ring-[#22c55e]/10 transition-all duration-300 shadow-md active:scale-[0.98]"
+            >
+              <Tv className="h-3.5 w-3.5 text-white" /> TP
+            </a>
+            <a
+              href={`/playout?date=${date}&programa=${encodeURIComponent(programa ?? "")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-white text-[11px] font-semibold uppercase tracking-wider hover:border-[#22c55e] hover:ring-4 hover:ring-[#22c55e]/10 transition-all duration-300 shadow-md active:scale-[0.98]"
+            >
+              <Tv className="h-3.5 w-3.5 text-white" /> PLAYOUT
+            </a>
           </div>
         </div>
       </div>
@@ -523,7 +539,7 @@ function EspelhoPage() {
           <select
             value={programa}
             onChange={(e) => { setPrograma(e.target.value); try { localStorage.setItem("espelho_programa", e.target.value); } catch {} }}
-            className="px-4 py-3.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-body-sm font-bold text-[#ffffff] focus:outline-none focus:border-[#22c55e] focus:ring-4 focus:ring-[#22c55e]/10 transition-all duration-300 appearance-none cursor-pointer"
+            className="w-[220px] px-4 py-3.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-body-sm font-bold text-[#ffffff] focus:outline-none focus:border-[#22c55e] focus:ring-4 focus:ring-[#22c55e]/10 transition-all duration-300 appearance-none cursor-pointer"
           >
             <option value="Todos">Todos os programas</option>
             {PROGRAMAS.map((p) => (
@@ -534,7 +550,7 @@ function EspelhoPage() {
           </select>
 
           {/* Previsto */}
-          <div className="font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-8 py-4 bg-[#141416] backdrop-blur-xl shadow-xl flex flex-col items-center justify-center min-w-[160px]">
+          <div className="font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-6 py-2 bg-[#141416] backdrop-blur-xl shadow-xl flex flex-col items-center justify-center min-w-[160px]">
             <span className="text-[#6b7280] text-label mb-1 font-black">
               PRODUÇÃO
             </span>
@@ -559,7 +575,7 @@ function EspelhoPage() {
           </div>
 
           {/* Master */}
-          <div className="font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-8 py-4 bg-[#141416] backdrop-blur-xl shadow-xl flex flex-col items-center justify-center min-w-[160px]">
+          <div className="font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-6 py-2 bg-[#141416] backdrop-blur-xl shadow-xl flex flex-col items-center justify-center min-w-[160px]">
             <span className="text-[#6b7280] text-label mb-1 font-black">
               MASTER
             </span>
@@ -586,7 +602,7 @@ function EspelhoPage() {
           {/* Diff */}
           {diffEditorial.type !== "balanceado" && (
             <div className={cn(
-              "font-mono text-display-lg border rounded-lg px-8 py-4 flex flex-col items-center justify-center min-w-[160px] shadow-xl",
+              "font-mono text-display-lg border rounded-lg px-6 py-2 flex flex-col items-center justify-center min-w-[160px] shadow-xl",
               diffEditorial.type === "estouro"
                 ? "bg-[#ef4444]/10 text-[#ef4444] border-[#ef4444]/30"
                 : "bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/30"
@@ -599,7 +615,7 @@ function EspelhoPage() {
           )}
 
           {/* Total geral */}
-          <div className="font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-8 py-4 bg-[#141416] backdrop-blur-xl flex flex-col items-center justify-center min-w-[160px] shadow-2xl">
+          <div className="font-mono text-display-lg border border-[#22c55e]/20 rounded-lg px-6 py-2 bg-[#141416] backdrop-blur-xl flex flex-col items-center justify-center min-w-[160px] shadow-2xl">
             <span className="text-[#6b7280] text-label mb-1 font-black">
               TOTAL
             </span>
@@ -611,30 +627,11 @@ function EspelhoPage() {
           {true && (
             <button
               onClick={addBloco}
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-md bg-[#22c55e] text-white text-body-sm font-semibold uppercase tracking-widest shadow-lg transition-all duration-300 hover:shadow-xl active:scale-[0.98]"
+              className="w-[220px] inline-flex items-center justify-center gap-2 px-6 py-3 rounded-md bg-[#22c55e] text-white text-body-sm font-semibold uppercase tracking-widest shadow-lg transition-all duration-300 hover:shadow-xl active:scale-[0.98]"
             >
               <Plus className="h-4 w-4" /> NOVO BLOCO
             </button>
           )}
-
-          {/* Botões de navegação para TP e Playout */}
-          <a
-            href={`/tp?date=${date}&programa=${encodeURIComponent(programa ?? "")}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-white text-body-sm font-semibold uppercase tracking-wider hover:border-[#22c55e] hover:ring-4 hover:ring-[#22c55e]/10 transition-all duration-300 shadow-md active:scale-[0.98]"
-          >
-            <Tv className="h-4 w-4 text-white" /> TP
-          </a>
-
-          <a
-            href={`/playout?date=${date}&programa=${encodeURIComponent(programa ?? "")}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-[#141416] border border-[#22c55e]/20 text-white text-body-sm font-semibold uppercase tracking-wider hover:border-[#22c55e] hover:ring-4 hover:ring-[#22c55e]/10 transition-all duration-300 shadow-md active:scale-[0.98]"
-          >
-            <Tv className="h-4 w-4 text-white" /> PLAYOUT
-          </a>
         </div>
       </div>
 
@@ -765,7 +762,7 @@ function EspelhoPage() {
                         <th className="w-8"></th>
                         <th className="text-center px-2 py-2 w-10">Status</th>
                         <th className="text-left px-3 py-2 w-12">#</th>
-                        <th className="text-left px-3 py-2 min-w-[300px] w-[450px]">
+                        <th className="text-left px-3 py-2 min-w-[180px] w-[240px]">
                           Assunto / Cabeça
                         </th>
                         <th className="text-left px-3 py-2 w-32">Formato</th>
@@ -986,7 +983,7 @@ function SortableRow({
     >
       <td
         className={cn(
-          "w-8 px-2 py-2 text-[#4b5563]",
+          "w-8 px-2 py-1 text-[#4b5563]",
           true && !isLocked && "cursor-grab active:cursor-grabbing hover:bg-[#22c55e]/10 transition-colors duration-200"
         )}
         {...(true && !isLocked ? attributes : {})}
@@ -995,7 +992,7 @@ function SortableRow({
         {true && <GripVertical className="h-4 w-4" />}
       </td>
 
-      <td className="px-3 py-2">
+      <td className="px-3 py-1">
         <div className="flex items-center justify-center">
           <div
             className={cn(
@@ -1010,11 +1007,11 @@ function SortableRow({
         </div>
       </td>
 
-      <td className="px-3 py-2 font-mono text-[10px] text-[#6b7280] font-bold">
+      <td className="px-3 py-1 font-mono text-[10px] text-[#6b7280] font-bold">
         <span className="text-[#6b7280]">{String(currentIndex + 1).padStart(2, "0")}</span>
       </td>
 
-      <td className="px-3 py-2">
+      <td className="px-3 py-1">
         <input
           value={assunto}
           disabled={!true || isLocked}
@@ -1026,7 +1023,7 @@ function SortableRow({
           }}
           className={cn("w-full bg-transparent focus:outline-none font-medium text-[#ffffff]", isCurrent && "text-[#ffffff]")}
         />
-        {item.materia_id && linkedMateria && (
+        {false && item.materia_id && linkedMateria && (
           <span
             className={cn(
               "inline-block mt-1 text-[10px] uppercase tracking-widest font-bold",
@@ -1043,7 +1040,7 @@ function SortableRow({
         )}
       </td>
 
-      <td className="px-3 py-2">
+      <td className="px-3 py-1">
         <select
           value={item.formato ?? ""}
           disabled={!true || isLocked}
@@ -1059,7 +1056,7 @@ function SortableRow({
         </select>
       </td>
 
-      <td className="px-3 py-2 text-center">
+      <td className="px-3 py-1 text-center">
         {true && !isLocked ? (
           <button
             type="button"
@@ -1076,7 +1073,7 @@ function SortableRow({
         )}
       </td>
 
-      <td className="px-3 py-2 text-center">
+      <td className="px-3 py-1 text-center">
         <input
           value={tempo}
           placeholder="0:00"
@@ -1089,22 +1086,22 @@ function SortableRow({
 
       <td
         className={cn(
-          "px-3 py-2 text-center font-bold font-mono",
+          "px-3 py-1 text-center font-bold font-mono",
           isCurrent ? "text-[#ffffff]" : "text-[#22c55e]"
         )}
       >
         {calcTotal(item)}
       </td>
 
-      <td className="px-3 py-2">
+      <td className="px-3 py-1">
         <span className="text-caption text-[#6b7280]">{linkedMateria?.editor_texto ?? "—"}</span>
       </td>
 
-      <td className="px-3 py-2">
+      <td className="px-3 py-1">
         <span className="text-caption text-[#6b7280]">{linkedMateria?.editor_imagem ?? "—"}</span>
       </td>
 
-      <td className="px-3 py-2">
+      <td className="px-3 py-1">
         {true && (
           <select
             value={item.status ?? "pendente"}
@@ -1126,7 +1123,7 @@ function SortableRow({
         )}
       </td>
 
-      <td className="px-3 py-2">
+      <td className="px-3 py-1">
         {true && (
           <button
             onClick={() => onDelete(item.id)}
