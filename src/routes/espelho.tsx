@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import {
   loadEspelho,
   loadMaterias,
@@ -19,6 +19,8 @@ import {
   broadcastMaster as broadcastMasterFn,
 } from "@/functions/espelho.functions";
 import { useEspelhoRealtime } from "@/hooks/useEspelhoRealtime";
+import { useAuth } from "@/lib/auth";
+import { supabase } from "@/lib/db";
 import { toast } from "sonner";
 import { parseTimeToSeconds, formatSecondsToTime } from "@/lib/time";
 import {
@@ -37,6 +39,7 @@ import {
   TouchSensor,
   useSensor,
   useSensors,
+  useDroppable,
   DragEndEvent,
 } from "@dnd-kit/core";
 import {
@@ -58,7 +61,7 @@ export const Route = createFileRoute("/espelho")({
   ssr: false,
 });
   
-type ItemStatus = "pendente" | "pronto" | "no_ar" | "exibido" | "cortado";
+type ItemStatus = "pendente" | "pronto" | "no_ar" | "exibido" | "cortado" | "gaveta";
 
 interface Bloco {
   id: string;
@@ -127,8 +130,18 @@ const FORMATOS = [
 
 const sanitize = (v: string) => v.replace(/<[^>]*>?/gm, "").trim();
 
+// Converte string ou Date (o driver às vezes retorna Date pra colunas de data) em "YYYY-MM-DD".
+// Retorna null se não der pra converter, pra quem chamar decidir o fallback.
+const toYmd = (v: unknown): string | null => {
+  if (!v) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === "string") return v.slice(0, 10);
+  return null;
+};
+
 function EspelhoPage() {
   const canDelete = (_table?: string) => true;
+  const { user } = useAuth();
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [programa, setPrograma] = useState<string>("Todos");
   // Restaura a escolha do jornal após montar no cliente (evita crash SSR com localStorage)
@@ -146,6 +159,25 @@ function EspelhoPage() {
   const [modalCabeca, setModalCabeca] = useState<Item | null>(null);
   const [plannedEditorialDuration, setPlannedEditorialDuration] = useState("00:00");
   const [masterDuration, setMasterDuration] = useState("00:00");
+  // Fonte real de "está na Gaveta": o backend rejeita status "gaveta" (não faz parte do
+  // enum válido), então o UPDATE de status pra "gaveta" sempre falha e o item nunca
+  // sairia da grade se dependêssemos só de item.status. Em vez disso, perguntamos
+  // direto pra tabela vt_gaveta (que funciona) quais itens do espelho já estão lá.
+  const [gavetaItemIds, setGavetaItemIds] = useState<Set<string>>(new Set());
+
+  const loadGavetaLinks = useCallback(async () => {
+    try {
+      // O wrapper de supabase usado aqui não implementa .not() — filtra client-side.
+      const { data, error } = await supabase.from("vt_gaveta").select("espelho_item_id");
+      if (error) throw error;
+      const ids = (data ?? [])
+        .map((r: any) => r.espelho_item_id as string | null)
+        .filter((v: string | null): v is string => !!v);
+      setGavetaItemIds(new Set(ids));
+    } catch (err: any) {
+      console.error("Falha ao carregar vínculos da Gaveta:", err.message);
+    }
+  }, []);
   // Set de IDs editando — alimentado pelo Centrifugo, visível em todos os browsers
   const { editingItemIds, connected: realtimeConnected } = useEspelhoRealtime({
     url: "wss://centrifugo-production-449f.up.railway.app/connection/websocket",
@@ -192,6 +224,78 @@ function EspelhoPage() {
     );
   }, []);
 
+  // Trava simples pra evitar que o mesmo item dispare duas idas à Gaveta em paralelo
+  // (acontece quando o select de status é reselecionado várias vezes rápido, ex.:
+  // porque o backend ainda rejeita o update de status pra "gaveta" e o dropdown volta
+  // a mostrar "Pendente" — ver nota mais abaixo).
+  const gavetaEmAndamento = useRef<Set<string>>(new Set());
+
+  // Envia um item do espelho que não foi ao ar para a Gaveta de VTs (aba "Gaveta" em /pautas),
+  // para que o material já produzido possa ser reaproveitado em outra edição.
+  const sendToGaveta = useCallback(
+    async (item: Item, blocoPrograma: string, blocoData: string, reporterNome?: string) => {
+      if (!user) {
+        toast.error("Faça login novamente para enviar VTs à Gaveta.");
+        return;
+      }
+
+      if (gavetaEmAndamento.current.has(item.id)) return; // já está sendo enviado, ignora o clique duplicado
+      gavetaEmAndamento.current.add(item.id);
+
+      try {
+        // Trava de duplicidade: este item já foi enviado à Gaveta antes?
+        const { data: existing, error: checkError } = await supabase
+          .from("vt_gaveta")
+          .select("id")
+          .eq("espelho_item_id", item.id)
+          .limit(1);
+        if (checkError) {
+          toast.error(checkError.message);
+          return;
+        }
+        if (existing && existing.length > 0) {
+          toast("Esse VT já está na Gaveta — sem duplicar.", { icon: "📦" });
+          return;
+        }
+
+        const partesObs = [`Enviado do Espelho (${new Date(date + "T00:00:00").toLocaleDateString("pt-BR")})`];
+        if (item.tempo) partesObs.push(`Tempo: ${item.tempo}`);
+        if (reporterNome) partesObs.push(`Repórter: ${reporterNome}`);
+
+        // Garante "YYYY-MM-DD" mesmo se blocoData vier como Date ou timestamp completo
+        // (evita "Invalid Date" na listagem da Gaveta em Pautas)
+        const dataPronto = toYmd(blocoData) ?? toYmd(date) ?? date;
+
+        const { error } = await supabase.from("vt_gaveta").insert({
+          programa: blocoPrograma,
+          retranca: (item.assunto || "SEM RETRANCA").toUpperCase(),
+          data_pronto: dataPronto,
+          observacao: partesObs.join(" · "),
+          autor_id: user.id,
+          espelho_item_id: item.id,
+        });
+        if (error) {
+          // 23505 = violação de índice único (a linha já existe) — trava de segurança do banco
+          if ((error as any).code === "23505") {
+            toast("Esse VT já está na Gaveta — sem duplicar.", { icon: "📦" });
+            setGavetaItemIds((prev) => new Set(prev).add(item.id));
+          } else {
+            toast.error(error.message);
+          }
+        } else {
+          // Some da grade do Espelho imediatamente — não espera o próximo load()/evento
+          // realtime pra refletir. item.status NÃO é tocado aqui (o backend não aceita
+          // "gaveta" como valor válido); quem decide "está na Gaveta" agora é este Set.
+          setGavetaItemIds((prev) => new Set(prev).add(item.id));
+          toast.success("VT enviado para a Gaveta — disponível em Pautas › Gaveta.");
+        }
+      } finally {
+        gavetaEmAndamento.current.delete(item.id);
+      }
+    },
+    [user, date]
+  );
+
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
@@ -209,7 +313,8 @@ function EspelhoPage() {
     } catch (err: any) {
       toast.error(err.message);
     }
-  }, [date, programa]);
+    loadGavetaLinks();
+  }, [date, programa, loadGavetaLinks]);
 
   // ── Sincroniza mudanças do espelho via Centrifugo (substitui o polling de 4s) ──
   // O hook useEspelhoRealtime chama load() sozinho quando recebe ESPELHO_ALTERADO.
@@ -343,7 +448,7 @@ function EspelhoPage() {
     let found = -1;
     blocos.forEach((block) => {
       itens
-        .filter((i) => i.bloco_id === block.id)
+        .filter((i) => i.bloco_id === block.id && !gavetaItemIds.has(i.id))
         .sort((a, b) => a.ordem - b.ordem)
         .forEach((item) => {
           const s = String(item.status ?? "").toLowerCase();
@@ -352,7 +457,7 @@ function EspelhoPage() {
         });
     });
     return found;
-  }, [itens, blocos]);
+  }, [itens, blocos, gavetaItemIds]);
 
   const calcTotal = useCallback(
     (i: Item) =>
@@ -416,6 +521,69 @@ function EspelhoPage() {
     if (!activeItem) return;
 
     const overItem = itens.find((i) => i.id === overId);
+
+    // Arrastou um VT da bandeja da Gaveta de volta para um bloco do Espelho:
+    // ele volta a status "pendente" e some da aba Gaveta em Pautas.
+    if (gavetaItemIds.has(activeId)) {
+      if (overItem && gavetaItemIds.has(overItem.id)) return; // soltou sobre outro chip da bandeja, ignora
+      const destinationBlocoId = overItem?.bloco_id ?? blocos.find((b) => b.id === overId)?.id ?? "";
+      if (!destinationBlocoId) return;
+
+      // Mesma estratégia do drag normal (abaixo): clona TODOS os itens e manda a lista
+      // inteira pro reorderItens — mandar só o subconjunto do bloco de destino é o que
+      // fazia o item não fixar (o backend não estava persistindo o bloco_id corretamente
+      // quando recebia uma lista parcial).
+      const newItens = structuredClone(itens) as Item[];
+      const target = newItens.find((i) => i.id === activeId)!;
+      target.bloco_id = destinationBlocoId;
+      target.status = "pendente";
+
+      const destItens = newItens
+        .filter((i) => i.bloco_id === destinationBlocoId && i.id !== activeId && !gavetaItemIds.has(i.id))
+        .sort((a, b) => a.ordem - b.ordem);
+      const overIdx = overItem ? destItens.findIndex((i) => i.id === overId) : -1;
+      overIdx >= 0 ? destItens.splice(overIdx, 0, target) : destItens.push(target);
+      destItens.forEach((it, idx) => {
+        const x = newItens.find((z) => z.id === it.id);
+        if (x) {
+          x.ordem = idx + 1;
+          x.bloco_id = destinationBlocoId;
+        }
+      });
+
+      setItens(newItens);
+      setGavetaItemIds((prev) => {
+        const next = new Set(prev);
+        next.delete(activeId);
+        return next;
+      });
+
+      try {
+        await reorderItens({
+          data: {
+            itens: newItens.map((it) => ({
+              id: it.id,
+              ordem: it.ordem,
+              bloco_id: it.bloco_id,
+            })),
+          },
+        });
+        await updateItemFn({ data: { id: activeId, patch: { status: "pendente" } } });
+        // Sai da Gaveta em Pautas — o mesmo VT não pode ficar duplicado lá
+        const { error: delErr } = await supabase
+          .from("vt_gaveta")
+          .delete()
+          .eq("espelho_item_id", activeId);
+        if (delErr) console.error("Falha ao remover da Gaveta em Pautas:", delErr.message);
+        toast.success("VT de volta ao Espelho.");
+      } catch (err: any) {
+        toast.error(err.message);
+        console.error("Falha ao mover VT da Gaveta pro bloco:", err);
+      }
+      load();
+      return;
+    }
+
     const destinationBlocoId = overItem?.bloco_id ?? blocos.find((b) => b.id === overId)?.id ?? "";
     if (!destinationBlocoId) return;
 
@@ -425,7 +593,7 @@ function EspelhoPage() {
 
     if (sourceBlocoId === destinationBlocoId) {
       const blockItens = newItens
-        .filter((i) => i.bloco_id === sourceBlocoId)
+        .filter((i) => i.bloco_id === sourceBlocoId && !gavetaItemIds.has(i.id))
         .sort((a, b) => a.ordem - b.ordem);
       const oldIdx = blockItens.findIndex((i) => i.id === activeId);
       const newIdx = blockItens.findIndex((i) => i.id === overId);
@@ -438,7 +606,7 @@ function EspelhoPage() {
       target.bloco_id = destinationBlocoId;
 
       const sourceItens = newItens
-        .filter((i) => i.bloco_id === sourceBlocoId && i.id !== activeId)
+        .filter((i) => i.bloco_id === sourceBlocoId && i.id !== activeId && !gavetaItemIds.has(i.id))
         .sort((a, b) => a.ordem - b.ordem);
       sourceItens.forEach((item, idx) => {
         const x = newItens.find((z) => z.id === item.id);
@@ -446,7 +614,7 @@ function EspelhoPage() {
       });
 
       const destItens = newItens
-        .filter((i) => i.bloco_id === destinationBlocoId && i.id !== activeId)
+        .filter((i) => i.bloco_id === destinationBlocoId && i.id !== activeId && !gavetaItemIds.has(i.id))
         .sort((a, b) => a.ordem - b.ordem);
       const overIdx = destItens.findIndex((i) => i.id === overId);
       overIdx >= 0 ? destItens.splice(overIdx, 0, target) : destItens.push(target);
@@ -477,15 +645,24 @@ function EspelhoPage() {
     load();
   };
 
+  // VTs que foram enviados para a Gaveta (somem das grades acima, mas ficam
+  // guardados aqui só pra dar um lembrete discreto — o resto mora em Pauta › Gaveta)
+  const itensGaveta = useMemo(
+    () => itens.filter((i) => gavetaItemIds.has(i.id)),
+    [itens, gavetaItemIds]
+  );
+  const itensGavetaVisiveis = itensGaveta.slice(0, 5);
+  const itensGavetaExtras = itensGaveta.length - itensGavetaVisiveis.length;
+
   const blockStartIndices = useMemo(() => {
     const map = new Map<string, number>();
     let counter = 0;
     blocos.forEach((b) => {
       map.set(b.id, counter);
-      counter += itens.filter((i) => i.bloco_id === b.id).length;
+      counter += itens.filter((i) => i.bloco_id === b.id && !gavetaItemIds.has(i.id)).length;
     });
     return map;
-  }, [blocos, itens]);
+  }, [blocos, itens, gavetaItemIds]);
 
   // Libera controles estruturais para editores, chefes de redação ou administradores
   const temPermissaoEdicaoGrade = true;
@@ -646,7 +823,10 @@ function EspelhoPage() {
 
           {blocos.map((b) => {
             const itensB = itens
-              .filter((i) => i.bloco_id === b.id)
+              // Itens enviados para a Gaveta somem do Espelho — continuam existindo
+              // no banco, mas o link em vt_gaveta (gavetaItemIds) é quem decide isso,
+              // já que o backend não aceita status "gaveta". Reaparecem em Pautas › Gaveta.
+              .filter((i) => i.bloco_id === b.id && !gavetaItemIds.has(i.id))
               .sort((a, b) => a.ordem - b.ordem);
             const tempoB = itensB.reduce(
               (a, i) => a + parseTimeToSeconds(i.tempo) + parseTimeToSeconds(i.tempo_cab),
@@ -655,7 +835,7 @@ function EspelhoPage() {
             const startIdx = blockStartIndices.get(b.id) ?? 0;
 
             return (
-              <div
+              <BlocoDropZone
                 key={b.id}
                 id={b.id}
                 className="group bg-[#141416] border border-[#22c55e]/20 rounded-lg overflow-hidden shadow-sm"
@@ -802,6 +982,14 @@ function EspelhoPage() {
                             profiles={profiles}
                             profileName={profileName}
                             calcTotal={calcTotal}
+                            onSendToGaveta={() =>
+                              sendToGaveta(
+                                item,
+                                b.programa,
+                                b.data_edicao,
+                                materias.find((m) => m.id === item.materia_id)?.credito_reporter ?? undefined
+                              )
+                            }
                           />
                         ))}
                         {itensB.length === 0 && (
@@ -818,10 +1006,42 @@ function EspelhoPage() {
                     </SortableContext>
                   </table>
                 </div>
-              </div>
+              </BlocoDropZone>
             );
           })}
         </div>
+
+        {/* Rodapé do Espelho: relação dos VTs na Gaveta. Fica fora de qualquer bloco —
+            some daqui assim que o item deixa de ter status "gaveta" (voltou ao Espelho
+            ou foi apagado direto em Pauta › Gaveta). Arraste um chip para qualquer
+            bloco acima para reativar o VT no Espelho. */}
+        {itensGaveta.length > 0 && (
+          <div className="shrink-0 border-t border-dashed border-[#3f3f46]/60 bg-[#0f0f11] px-5 py-3 rounded-lg mt-2">
+            <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+              <span className="text-[10px] uppercase tracking-widest text-[#6b7280] font-bold">
+                📦 Gaveta — arraste de volta pro Espelho
+              </span>
+              {itensGavetaExtras > 0 && (
+                <a
+                  href="/pautas?tab=gaveta"
+                  className="text-[10px] text-[#22c55e]/70 hover:text-[#22c55e] underline decoration-dotted transition-colors duration-200"
+                >
+                  +{itensGavetaExtras} na Gaveta — ver em Pauta › Gaveta
+                </a>
+              )}
+            </div>
+            <SortableContext
+              items={itensGavetaVisiveis.map((i) => i.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="flex flex-wrap gap-2">
+                {itensGavetaVisiveis.map((item) => (
+                  <GavetaChip key={item.id} item={item} />
+                ))}
+              </div>
+            </SortableContext>
+          </div>
+        )}
       </DndContext>
 
       {/* Modal: Matéria — Edição Direta */}
@@ -890,6 +1110,62 @@ function EspelhoPage() {
   );
 }
 
+// Torna o bloco inteiro um alvo de drop válido do dnd-kit, mesmo quando ele
+// está vazio (0 itens). Sem isso, um bloco sem itens não tem nenhum elemento
+// sortable dentro do seu SortableContext, então soltar um chip da Gaveta nele
+// não gera nenhum "over" válido e o item simplesmente volta pro lugar de origem.
+function BlocoDropZone({
+  id,
+  className,
+  children,
+}: {
+  id: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      id={id}
+      className={cn(className, isOver && "ring-2 ring-[#22c55e]/40")}
+    >
+      {children}
+    </div>
+  );
+}
+
+// Chip arrastável de um VT que está na Gaveta — arraste sobre qualquer bloco
+// do Espelho para reativá-lo (volta a status "pendente" e some da Gaveta em Pautas).
+function GavetaChip({ item }: { item: Item }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.id,
+  });
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+    zIndex: isDragging ? 50 : 0,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      title={`Arraste para trazer "${item.assunto}" de volta ao Espelho`}
+      className={cn(
+        "flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-dashed border-[#3f3f46] bg-[#141416]/60 text-[10px] text-[#9ca3af] cursor-grab active:cursor-grabbing select-none max-w-[220px] hover:border-[#22c55e]/50 hover:text-white transition-colors duration-200",
+        isDragging && "opacity-50"
+      )}
+    >
+      <GripVertical className="h-3 w-3 shrink-0 opacity-50" />
+      <span className="truncate">📦 {item.assunto}</span>
+    </div>
+  );
+}
+
 function SortableRow({
   item,
   currentIndex,
@@ -902,6 +1178,7 @@ function SortableRow({
   materias,
   profileName,
   calcTotal,
+  onSendToGaveta,
 }: {
   item: Item;
   index: number;
@@ -917,6 +1194,7 @@ function SortableRow({
   profiles: Profile[];
   profileName: (id: string | null) => string;
   calcTotal: (i: Item) => string;
+  onSendToGaveta: () => void;
 }) {
   const [assunto, setAssunto] = useState(item.assunto);
   const [tempoCab, setTempoCab] = useState(item.tempo_cab ?? "0:00");
@@ -1001,6 +1279,8 @@ function SortableRow({
                 ? "bg-yellow-400 animate-pulse"
                 : item.status === "cortado"
                 ? "bg-gray-500"
+                : item.status === "gaveta"
+                ? "bg-blue-400"
                 : dotColor
             )}
           />
@@ -1106,7 +1386,16 @@ function SortableRow({
           <select
             value={item.status ?? "pendente"}
             disabled={isLocked}
-            onChange={(e) => onUpdate(item.id, { status: e.target.value as ItemStatus })}
+            onChange={(e) => {
+              const novo = e.target.value as ItemStatus;
+              if (novo === "gaveta") {
+                // Backend não aceita "gaveta" como status válido — não tenta salvar isso.
+                // O envio à Gaveta é feito só via vt_gaveta (ver sendToGaveta/gavetaItemIds).
+                onSendToGaveta();
+                return;
+              }
+              onUpdate(item.id, { status: novo });
+            }}
             className="text-caption bg-[#141416] border border-[#22c55e]/20 rounded-md px-2 py-1 w-full appearance-none cursor-pointer transition-all duration-300 hover:border-[#22c55e]/30"
           >
             <option value="pendente">Pendente</option>
@@ -1114,6 +1403,7 @@ function SortableRow({
             <option value="no_ar">🔴 No Ar</option>
             <option value="exibido">✅ Exibido</option>
             <option value="cortado">Cortado</option>
+            <option value="gaveta">📦 Gaveta</option>
           </select>
         )}
         {!true && (

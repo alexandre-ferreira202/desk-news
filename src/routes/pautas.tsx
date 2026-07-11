@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/db";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import {
@@ -61,8 +61,28 @@ interface QuadroCard {
   autor_id: string;
 }
 
-interface Aviso { id: string; assunto: string; data: string; autor_id: string; }
-interface VtGaveta { id: string; programa: string; retranca: string; data_pronto: string; observacao: string | null; autor_id: string; }
+interface Aviso {
+  id: string;
+  assunto: string;
+  data: string;
+  autor_id: string;
+  autor_nome?: string | null;
+  prioridade?: "normal" | "importante" | "urgente";
+  fixado?: boolean;
+  expira_em?: string | null;
+  visto_por?: string[] | null;
+}
+interface VtGaveta {
+  id: string;
+  programa: string;
+  retranca: string;
+  data_pronto: string;
+  observacao: string | null;
+  autor_id: string;
+  // Vínculo com o item de origem no Espelho — usado para evitar duplicar o
+  // mesmo VT na Gaveta e para removê-lo daqui quando ele volta ao Espelho.
+  espelho_item_id: string | null;
+}
 
 // FIX: removido `const sb: any = supabase` — era um alias desnecessário que contornava tipagem
 
@@ -1013,16 +1033,67 @@ function SearchPautas({ onEdit }: { onEdit: (p: Pauta) => void }) {
 
 /* ========================= AVISOS ========================= */
 
+const PRIORIDADES = [
+  { key: "normal", label: "Informativo", dot: "bg-slate-500", border: "border-l-slate-500", chip: "text-slate-400 border-slate-500/30 bg-slate-500/10" },
+  { key: "importante", label: "Importante", dot: "bg-amber-400", border: "border-l-amber-400", chip: "text-amber-300 border-amber-400/40 bg-amber-400/10" },
+  { key: "urgente", label: "Urgente", dot: "bg-red-500", border: "border-l-red-500", chip: "text-red-400 border-red-500/40 bg-red-500/10" },
+] as const;
+
+function prioridadeInfo(p?: string) {
+  return PRIORIDADES.find((x) => x.key === p) ?? PRIORIDADES[0];
+}
+
+// Data amigável: "Hoje", "Ontem" ou dd/mm — como em qualquer mural de avisos moderno (Slack, Trello, Basecamp)
+function formatDataAviso(dataStr: string): string {
+  const hoje = ymd(new Date());
+  const ontem = ymd(new Date(Date.now() - 86400000));
+  if (dataStr === hoje) return "Hoje";
+  if (dataStr === ontem) return "Ontem";
+  return new Date(dataStr + "T00:00:00").toLocaleDateString("pt-BR");
+}
+
+function grupoDoAviso(dataStr: string): string {
+  const d = new Date(dataStr + "T00:00:00");
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const diffDias = Math.round((hoje.getTime() - d.getTime()) / 86400000);
+  if (diffDias <= 0) return "Hoje";
+  if (diffDias === 1) return "Ontem";
+  if (diffDias <= 7) return "Esta semana";
+  return "Mais antigos";
+}
+
+function AvisosSkeletonCard() {
+  return (
+    <div className="rounded border border-[#22c55e]/10 bg-[#141416] p-4 border-l-4 border-l-[#22c55e]/20 animate-pulse">
+      <div className="h-3 w-2/3 bg-[#22c55e]/10 rounded mb-2" />
+      <div className="h-3 w-1/3 bg-[#22c55e]/10 rounded" />
+    </div>
+  );
+}
+
 function AvisosPanel() {
   const { user } = useAuth();
   const [avisos, setAvisos] = useState<Aviso[]>([]);
+  const [loading, setLoading] = useState(true);
   const [newAssunto, setNewAssunto] = useState("");
+  const [newPrioridade, setNewPrioridade] = useState<typeof PRIORIDADES[number]["key"]>("normal");
+  const [newExpira, setNewExpira] = useState("");
+  const [busca, setBusca] = useState("");
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const CHAR_LIMIT = 500;
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase.from("avisos").select("*").order("data", { ascending: false });
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("avisos")
+      .select("*")
+      .order("fixado", { ascending: false })
+      .order("data", { ascending: false });
     if (error) toast.error(error.message);
     else setAvisos((data ?? []) as Aviso[]);
+    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -1031,57 +1102,233 @@ function AvisosPanel() {
     if (!newAssunto.trim() || !user) return;
     setSaving(true);
     const { error } = await supabase.from("avisos").insert({
-      assunto: newAssunto,
+      assunto: newAssunto.trim(),
       data: ymd(new Date()),
       autor_id: user.id,
+      autor_nome: (user as any)?.nome ?? (user as any)?.user_metadata?.nome ?? (user as any)?.email ?? null,
+      prioridade: newPrioridade,
+      fixado: false,
+      expira_em: newExpira || null,
+      visto_por: [],
     });
     setSaving(false);
     if (error) toast.error(error.message);
-    else { setNewAssunto(""); load(); }
+    else {
+      setNewAssunto("");
+      setNewPrioridade("normal");
+      setNewExpira("");
+      load();
+    }
   };
 
   const remove = async (id: string) => {
     const { error } = await supabase.from("avisos").delete().eq("id", id);
     if (error) toast.error(error.message);
+    else { setConfirmDelete(null); load(); }
+  };
+
+  const togglePin = async (a: Aviso) => {
+    const { error } = await supabase.from("avisos").update({ fixado: !a.fixado }).eq("id", a.id);
+    if (error) toast.error(error.message);
     else load();
   };
 
-  return (
-    <div className="space-y-4">
-      <div className="rounded border border-[#22c55e]/20 bg-[#141416] p-5 border-l-4 border-l-[#22c55e]">
-        <Label>Novo Aviso</Label>
-        <div className="flex gap-2">
-          <input
-            value={newAssunto}
-            onChange={(e) => setNewAssunto(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") add(); }}
-            placeholder="Assunto do aviso..."
-            className={inputCls}
-          />
-          <Button onClick={add} disabled={saving || !newAssunto.trim()}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          </Button>
-        </div>
-      </div>
+  const toggleCiente = async (a: Aviso) => {
+    if (!user) return;
+    const atual = a.visto_por ?? [];
+    const jaViu = atual.includes(user.id);
+    const novo = jaViu ? atual.filter((id) => id !== user.id) : [...atual, user.id];
+    const { error } = await supabase.from("avisos").update({ visto_por: novo }).eq("id", a.id);
+    if (error) toast.error(error.message);
+    else load();
+  };
 
-      <div className="space-y-2">
-        {avisos.map((a) => (
-          <div key={a.id} className="rounded border border-[#22c55e]/20 bg-[#141416] p-4 flex items-start justify-between gap-2 border-l-4 border-l-[#22c55e] group">
-            <div>
-              <div className="font-medium text-white">{a.assunto}</div>
-              <div className="text-xs text-[#6b7280] mt-1">{new Date(a.data + "T00:00:00").toLocaleDateString("pt-BR")}</div>
+  // Expirados somem do mural, como um quadro que se "limpa" sozinho
+  const hoje = ymd(new Date());
+  const visiveis = avisos.filter((a) => !a.expira_em || a.expira_em >= hoje);
+  const filtrados = busca.trim()
+    ? visiveis.filter((a) => a.assunto.toLowerCase().includes(busca.trim().toLowerCase()))
+    : visiveis;
+
+  const fixados = filtrados.filter((a) => a.fixado);
+  const naoFixados = filtrados.filter((a) => !a.fixado);
+
+  const grupos: Record<string, Aviso[]> = {};
+  naoFixados.forEach((a) => {
+    const g = grupoDoAviso(a.data);
+    (grupos[g] ??= []).push(a);
+  });
+  const ordemGrupos = ["Hoje", "Ontem", "Esta semana", "Mais antigos"];
+
+  const renderCard = (a: Aviso, destaque = false) => {
+    const info = prioridadeInfo(a.prioridade);
+    const isConfirming = confirmDelete === a.id;
+    const jaCiente = user ? (a.visto_por ?? []).includes(user.id) : false;
+    const vistoCount = (a.visto_por ?? []).length;
+
+    return (
+      <div
+        key={a.id}
+        className={cn(
+          "rounded border bg-[#141416] p-4 border-l-4 group transition-all",
+          info.border,
+          destaque ? "border-[#22c55e]/40 shadow-[0_0_20px_#22c55e10]" : "border-[#22c55e]/20"
+        )}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap mb-1.5">
+              {destaque && <span className="text-[10px] text-[#22c55e]">📌</span>}
+              <span className={cn("text-[10px] px-2 py-0.5 rounded-full border font-mono uppercase tracking-wider flex items-center gap-1", info.chip)}>
+                <span className={cn("h-1.5 w-1.5 rounded-full", info.dot)} /> {info.label}
+              </span>
+              <span className="text-[10px] text-[#6b7280] font-mono">{formatDataAviso(a.data)}</span>
+              {a.autor_nome && <span className="text-[10px] text-[#6b7280]">· {a.autor_nome}</span>}
+              {a.expira_em && (
+                <span className="text-[10px] text-[#6b7280] font-mono">· expira {new Date(a.expira_em + "T00:00:00").toLocaleDateString("pt-BR")}</span>
+              )}
             </div>
-            {user?.id === a.autor_id && (
+            <div className="text-white whitespace-pre-wrap break-words">{a.assunto}</div>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => togglePin(a)}
+              title={a.fixado ? "Desafixar" : "Fixar no topo"}
+              className={cn(
+                "p-1.5 rounded transition-all",
+                a.fixado ? "text-[#22c55e]" : "text-[#6b7280] opacity-0 group-hover:opacity-100 hover:text-[#22c55e]"
+              )}
+            >
+              📌
+            </button>
+            {user?.id === a.autor_id && !isConfirming && (
               <button
-                onClick={() => remove(a.id)}
-                className="opacity-0 group-hover:opacity-100 text-[#6b7280] hover:text-red-500 transition-all p-1"
+                onClick={() => setConfirmDelete(a.id)}
+                className="opacity-0 group-hover:opacity-100 text-[#6b7280] hover:text-red-500 transition-all p-1.5"
               >
                 <Trash2 className="h-4 w-4" />
               </button>
             )}
           </div>
-        ))}
+        </div>
+
+        {isConfirming ? (
+          <div className="flex items-center gap-3 mt-3 p-2.5 rounded bg-red-500/10 border border-red-500/30">
+            <p className="text-xs text-red-400 flex-1">Excluir este aviso permanentemente?</p>
+            <button onClick={() => remove(a.id)} className="px-3 py-1 rounded bg-red-500/20 border border-red-500/50 text-red-300 text-xs font-bold uppercase hover:bg-red-500/30 transition-all">
+              Excluir
+            </button>
+            <button onClick={() => setConfirmDelete(null)} className="px-3 py-1 rounded border border-slate-700 text-slate-400 text-xs uppercase hover:text-slate-200 transition-all">
+              Cancelar
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between mt-3">
+            <button
+              onClick={() => toggleCiente(a)}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-mono uppercase tracking-wider border transition-all",
+                jaCiente
+                  ? "border-[#22c55e]/50 bg-[#22c55e]/10 text-[#22c55e]"
+                  : "border-[#22c55e]/20 text-[#6b7280] hover:text-[#22c55e] hover:border-[#22c55e]/40"
+              )}
+            >
+              <CheckCircle2 className="h-3 w-3" /> {jaCiente ? "Ciente" : "Marcar como ciente"}
+            </button>
+            {vistoCount > 0 && (
+              <span className="text-[10px] text-[#6b7280] font-mono">{vistoCount} confirmação{vistoCount !== 1 ? "ões" : ""}</span>
+            )}
+          </div>
+        )}
       </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Novo aviso */}
+      <div className="rounded border border-[#22c55e]/20 bg-[#141416] p-5 border-l-4 border-l-[#22c55e] space-y-3">
+        <Label>Novo Aviso</Label>
+        <div className="relative">
+          <textarea
+            value={newAssunto}
+            onChange={(e) => setNewAssunto(e.target.value.slice(0, CHAR_LIMIT))}
+            onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) add(); }}
+            placeholder="Escreva o aviso para a redação... (Ctrl+Enter para publicar)"
+            rows={3}
+            className={inputCls + " resize-none"}
+          />
+          <span className="absolute bottom-2 right-2 text-[10px] text-[#6b7280] font-mono">{newAssunto.length}/{CHAR_LIMIT}</span>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {PRIORIDADES.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => setNewPrioridade(p.key)}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono uppercase tracking-wider border transition-all",
+                newPrioridade === p.key ? p.chip : "border-[#22c55e]/10 text-[#6b7280] hover:text-slate-300"
+              )}
+            >
+              <span className={cn("h-1.5 w-1.5 rounded-full", p.dot)} /> {p.label}
+            </button>
+          ))}
+          <div className="flex items-center gap-1.5 ml-auto">
+            <span className="text-[10px] text-[#6b7280] font-mono uppercase">Expira em</span>
+            <input
+              type="date"
+              value={newExpira}
+              onChange={(e) => setNewExpira(e.target.value)}
+              className="px-2 py-1 rounded border border-[#22c55e]/20 bg-[#09090b] text-white text-xs focus:outline-none focus:border-[#22c55e]/50"
+            />
+          </div>
+          <Button onClick={add} disabled={saving || !newAssunto.trim()}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Publicar
+          </Button>
+        </div>
+      </div>
+
+      {/* Busca */}
+      {avisos.length > 0 && (
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#6b7280] pointer-events-none" />
+          <input
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Buscar avisos..."
+            className={inputCls + " pl-9"}
+          />
+        </div>
+      )}
+
+      {/* Lista */}
+      {loading ? (
+        <div className="space-y-2">
+          <AvisosSkeletonCard /><AvisosSkeletonCard /><AvisosSkeletonCard />
+        </div>
+      ) : filtrados.length === 0 ? (
+        <div className="rounded border border-dashed border-[#22c55e]/20 bg-[#141416] p-10 text-center">
+          <p className="text-[#6b7280] text-sm">
+            {busca ? "Nenhum aviso encontrado para essa busca." : "Nenhum aviso no mural."}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {fixados.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-mono uppercase tracking-widest text-[#22c55e]">📌 Fixados</p>
+              <div className="space-y-2">{fixados.map((a) => renderCard(a, true))}</div>
+            </div>
+          )}
+          {ordemGrupos.filter((g) => grupos[g]?.length).map((g) => (
+            <div key={g} className="space-y-2">
+              <p className="text-[10px] font-mono uppercase tracking-widest text-[#6b7280]">{g}</p>
+              <div className="space-y-2">{grupos[g].map((a) => renderCard(a))}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1110,7 +1357,11 @@ function GavetaVTs() {
   useEffect(() => { load(); }, [load]);
 
   const remove = async (id: string) => {
-    if (!window.confirm("Remover?")) return;
+    const vinculado = vts.find((v) => v.id === id)?.espelho_item_id;
+    const msg = vinculado
+      ? "Este VT veio do Espelho. Apagar aqui NÃO faz ele voltar pro Espelho — ele continua oculto lá. Prefira arrastá-lo de volta pro Espelho em vez de apagar. Apagar mesmo assim?"
+      : "Remover?";
+    if (!window.confirm(msg)) return;
     const { error } = await supabase.from("vt_gaveta").delete().eq("id", id);
     if (error) toast.error(error.message);
     else load();
@@ -1175,6 +1426,11 @@ function GavetaVTs() {
                   <span className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-[#22c55e]/10 text-[#22c55e]">
                     {v.programa}
                   </span>
+                  {v.observacao?.startsWith("Enviado do Espelho") && (
+                    <span className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-blue-400/10 text-blue-300">
+                      📦 via Espelho
+                    </span>
+                  )}
                 </div>
                 {v.observacao && (
                   <div className="text-xs text-[#6b7280] mt-1 whitespace-pre-wrap">{v.observacao}</div>

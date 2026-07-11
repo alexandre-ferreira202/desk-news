@@ -1009,6 +1009,22 @@ function PlayoutPage() {
   const [playerBZ, setPlayerBZ] = useState(0);
   const [lastClickTime, setLastClickTime] = useState(0);
 
+  // ── CROMA KEY ──
+  const [chromaOpen, setChromaOpen] = useState(false);
+  const [chromaFile, setChromaFile] = useState<LocalVideoFile | null>(null);
+  const [chromaColor, setChromaColor] = useState({ r: 0, g: 177, b: 64 });
+  const [chromaColorHex, setChromaColorHex] = useState("#00b140");
+  const [chromaTolerance, setChromaTolerance] = useState(80);
+  const [chromaSpill, setChromaSpill] = useState(15);
+  const [chromaScale, setChromaScale] = useState(100);
+  const [chromaActive, setChromaActive] = useState(false);
+  const [chromaBgUrl, setChromaBgUrl] = useState<string | null>(null);
+  const chromaVideoRef = useRef<HTMLVideoElement | null>(null);
+  const chromaCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const chromaOffscreenRef = useRef<HTMLCanvasElement | null>(null);
+  const chromaRafRef = useRef<number | null>(null);
+  const chromaBgFileInputRef = useRef<HTMLInputElement>(null);
+
   // ── Rastreia itens da lauda removidos (para não voltar com reload do banco) ──
   // Chave: materia_id, Valor: Set de "ordens" já creditadas
   const [removedLaudaOrdens, setRemovedLaudaOrdens] = useState<Record<string, Set<number>>>({});
@@ -2678,6 +2694,37 @@ function PlayoutPage() {
   const applyTransOpacity = useCallback((value: number, currentActivePlayer: "A" | "B" = "A") => {
     const incomingOpacity = value / 100;
     const outgoingOpacity = 1 - incomingOpacity;
+
+    if (transitionType === "wipe") {
+      // Mapa de clip-path por direção: 0=→ 1=← 2=↓ 3=↑ 4=⬋ 5=⬊
+      const pct = value;
+      const clipMap: Record<number, string> = {
+        0: `inset(0 ${100 - pct}% 0 0)`,         // esquerda → direita
+        1: `inset(0 0 0 ${100 - pct}%)`,          // direita → esquerda
+        2: `inset(0 0 ${100 - pct}% 0)`,          // cima → baixo
+        3: `inset(${100 - pct}% 0 0 0)`,          // baixo → cima
+        4: `inset(0 ${100 - pct}% ${100 - pct}% 0)`, // diagonal ⬋
+        5: `inset(0 0 ${100 - pct}% ${100 - pct}%)`, // diagonal ⬊
+      };
+      const clip = clipMap[wipeDirIdx] ?? clipMap[0];
+
+      if (currentActivePlayer === "A") {
+        // B entra com wipe por cima de A
+        setPlayerBZ(10);
+        setPlayerBOpacity(1);
+        setPlayerAOpacity(1);
+        if (pgmBRef.current) pgmBRef.current.style.clipPath = clip;
+      } else {
+        // A entra com wipe por cima de B
+        setPlayerAZ(10);
+        setPlayerAOpacity(1);
+        setPlayerBOpacity(1);
+        if (pgmARef.current) pgmARef.current.style.clipPath = clip;
+      }
+      return;
+    }
+
+    // Dissolve (MIX) e CUT — comportamento original
     if (currentActivePlayer === "A") {
       // A sai, B entra
       setPlayerAOpacity(outgoingOpacity);
@@ -2687,7 +2734,7 @@ function PlayoutPage() {
       setPlayerBOpacity(outgoingOpacity);
       setPlayerAOpacity(incomingOpacity);
     }
-  }, []);
+  }, [transitionType, wipeDirIdx]);
 
   const handleTransition = () => {
     if (!selectedFile) {
@@ -2702,9 +2749,15 @@ function PlayoutPage() {
         inactiveEl.load();
       }
       inactiveEl.currentTime = 0;
-      // Garante que o inativo começa invisível
-      if (activePlayer === "A") { setPlayerBOpacity(0); setPlayerBZ(0); }
-      else { setPlayerAOpacity(0); setPlayerAZ(0); }
+      // No WIPE o player inativo começa com clip-path fechado mas visível e acima
+      // No dissolve/cut começa invisível (opacity 0)
+      if (transitionType === "wipe") {
+        if (activePlayer === "A") { setPlayerBOpacity(1); setPlayerBZ(10); if (pgmBRef.current) pgmBRef.current.style.clipPath = "inset(0 100% 0 0)"; }
+        else { setPlayerAOpacity(1); setPlayerAZ(10); if (pgmARef.current) pgmARef.current.style.clipPath = "inset(0 100% 0 0)"; }
+      } else {
+        if (activePlayer === "A") { setPlayerBOpacity(0); setPlayerBZ(0); }
+        else { setPlayerAOpacity(0); setPlayerAZ(0); }
+      }
       inactiveEl.play().catch(() => {});
     }
   };
@@ -2717,6 +2770,10 @@ function PlayoutPage() {
     const activeEl = activePlayer === "A" ? pgmARef.current : pgmBRef.current;
     const inactiveEl = activePlayer === "A" ? pgmBRef.current : pgmARef.current;
     const nextPlayer = activePlayer === "A" ? "B" : "A";
+
+    // Limpa clip-path de ambos os players (usado pelo WIPE)
+    if (pgmARef.current) pgmARef.current.style.clipPath = "";
+    if (pgmBRef.current) pgmBRef.current.style.clipPath = "";
 
     // Para o player que estava no ar
     if (activeEl) {
@@ -2765,7 +2822,111 @@ function PlayoutPage() {
       }
     }, 16);
     autoTransRef.current = interval;
-  }, [autoTransRunning, transitionType, autoTransDur, activePlayer]);
+  }, [autoTransRunning, transitionType, autoTransDur, activePlayer, applyTransOpacity]);
+
+  // ── CHROMA KEY POPUP ──
+  // ── CROMA KEY — funções ──
+
+  const startChromaLoop = useCallback(() => {
+    const video = chromaVideoRef.current;
+    const canvas = chromaCanvasRef.current;
+    const offscreen = chromaOffscreenRef.current;
+    if (!video || !canvas || !offscreen) return;
+    if (chromaRafRef.current) cancelAnimationFrame(chromaRafRef.current);
+
+    const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+    const octx = offscreen.getContext("2d", { willReadFrequently: true })!;
+
+    const tick = () => {
+      if (video.readyState >= 2) {
+        const scale = chromaScale / 100;
+        const ow = Math.round(canvas.width * scale);
+        const oh = Math.round(canvas.height * scale);
+        offscreen.width = ow;
+        offscreen.height = oh;
+
+        octx.drawImage(video, 0, 0, ow, oh);
+        const imageData = octx.getImageData(0, 0, ow, oh);
+        const d = imageData.data;
+        const { r: cr, g: cg, b: cb } = chromaColor;
+        const tol = chromaTolerance;
+        const sp = chromaSpill;
+
+        for (let i = 0; i < d.length; i += 4) {
+          const r = d[i], g = d[i + 1], b = d[i + 2];
+          const dr = r - cr, dg = g - cg, db = b - cb;
+          const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+          if (dist < tol) {
+            d[i + 3] = 0;
+          } else if (dist < tol + sp) {
+            const ratio = (dist - tol) / sp;
+            d[i + 3] = Math.round(255 * ratio);
+            const suppress = 1 - ratio;
+            if (cg > cr && cg > cb) d[i + 1] = Math.round(g - (g - Math.max(r, b)) * suppress * 0.6);
+            else if (cb > cr && cb > cg) d[i + 2] = Math.round(b - (b - Math.max(r, g)) * suppress * 0.6);
+          }
+        }
+        octx.putImageData(imageData, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
+      }
+      chromaRafRef.current = requestAnimationFrame(tick);
+    };
+    chromaRafRef.current = requestAnimationFrame(tick);
+  }, [chromaColor, chromaTolerance, chromaSpill, chromaScale]);
+
+  const stopChromaLoop = useCallback(() => {
+    if (chromaRafRef.current) { cancelAnimationFrame(chromaRafRef.current); chromaRafRef.current = null; }
+  }, []);
+
+  const selectChromaFile = useCallback((file: LocalVideoFile) => {
+    setChromaFile(file);
+    if (!chromaVideoRef.current) chromaVideoRef.current = document.createElement("video");
+    const v = chromaVideoRef.current;
+    v.src = file.blobUrl;
+    v.loop = true;
+    v.muted = true;
+    v.playsInline = true;
+    v.onloadedmetadata = () => {
+      if (chromaCanvasRef.current) {
+        chromaCanvasRef.current.width = v.videoWidth || 1280;
+        chromaCanvasRef.current.height = v.videoHeight || 720;
+      }
+    };
+    v.play().catch(() => {});
+    startChromaLoop();
+  }, [startChromaLoop]);
+
+  const sendChromaToPgm = useCallback(() => {
+    const canvas = chromaCanvasRef.current;
+    if (!canvas) return;
+    // Captura o stream do canvas
+    const stream = (canvas as any).captureStream(30) as MediaStream;
+    // Injeta no player inativo e faz take
+    const inactiveEl = activePlayer === "A" ? pgmBRef.current : pgmARef.current;
+    const nextPlayer = activePlayer === "A" ? "B" : "A";
+    if (!inactiveEl) return;
+    inactiveEl.srcObject = stream;
+    inactiveEl.src = "";
+    inactiveEl.play().catch(() => {});
+    // Troca players
+    if (nextPlayer === "B") { setPlayerAOpacity(0); setPlayerAZ(0); setPlayerBOpacity(1); setPlayerBZ(10); }
+    else { setPlayerBOpacity(0); setPlayerBZ(0); setPlayerAOpacity(1); setPlayerAZ(10); }
+    setActivePlayer(nextPlayer);
+    setIsPlaying(true);
+    setChromaActive(true);
+    toast.success("🟩 Croma Key no PGM!");
+  }, [activePlayer]);
+
+  const stopChromaPgm = useCallback(() => {
+    // Libera srcObject do player ativo
+    const activeEl = activePlayer === "A" ? pgmARef.current : pgmBRef.current;
+    if (activeEl) { activeEl.srcObject = null; activeEl.src = ""; activeEl.pause(); }
+    setChromaActive(false);
+    stopChromaLoop();
+    if (chromaVideoRef.current) { chromaVideoRef.current.pause(); chromaVideoRef.current.src = ""; chromaVideoRef.current = null; }
+    toast("🟩 Croma Key desativado");
+  }, [activePlayer, stopChromaLoop]);
 
   // ── DSK FILE LOAD ──
   const handleDskLoad = (file: File) => {
@@ -3424,14 +3585,8 @@ function PlayoutPage() {
                     <div className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" /> NO AR
                   </div>
                 )}
-                {pgmFile && items[currentIndex - 1]?.cabeca && (
-                  <div className="absolute bottom-4 left-4 right-4 z-30">
-                    <div className="bg-black/90 border-l-4 border-red-600 px-3 py-1.5">
-                     // 
-                      <div className="text-[9px] text-zinc-400">{items[currentIndex - 1]?.assunto}</div>
-                    </div>
-                  </div>
-                )}
+                {/* Removido: overlay de assunto/cabeça sobre o PGM — duplicava a tarja de
+                    créditos (GC) que já cumpre esse papel. Ver GC Overlay abaixo. */}
                 {/* LEGENDAS — CC Teleprompter (lauda sincronizada com o VT) */}
                 {legendasAtivas && (
                   <div
@@ -3582,6 +3737,17 @@ function PlayoutPage() {
                     src={meFrames[meActiveFrame] as string}
                     alt={`Frame ${meActiveFrame + 1}`}
                     className="absolute inset-0 w-full h-full object-contain z-50 pointer-events-none"
+                  />
+                )}
+                {/* DSK — Downstream Keyer: última camada, fica por cima de tudo.
+                    Renderizado aqui também (não só mandado via WebSocket) pra dar
+                    confirmação visual local de exatamente o que está indo pro ar. */}
+                {dskActive && dskPng && (
+                  <img
+                    src={dskPng}
+                    alt="DSK"
+                    style={{ opacity: dskOpacity / 100 }}
+                    className="absolute inset-0 w-full h-full object-contain z-[60] pointer-events-none"
                   />
                 )}
               </div>
@@ -4346,6 +4512,9 @@ function PlayoutPage() {
                           if (pct >= 95) { handleTransComplete(); }
                           else {
                             setTransValue(0);
+                            // Limpa clip-path do WIPE ao cancelar
+                            if (pgmARef.current) pgmARef.current.style.clipPath = "";
+                            if (pgmBRef.current) pgmBRef.current.style.clipPath = "";
                             setPlayerAOpacity(activePlayer === "A" ? 1 : 0); setPlayerAZ(activePlayer === "A" ? 10 : 0);
                             setPlayerBOpacity(activePlayer === "B" ? 1 : 0); setPlayerBZ(activePlayer === "B" ? 10 : 0);
                             const inactiveEl = activePlayer === "A" ? pgmBRef.current : pgmARef.current;
@@ -4449,6 +4618,18 @@ function PlayoutPage() {
                       className="w-full py-1.5 rounded text-[8px] font-black uppercase tracking-widest border transition-all active:scale-[0.97]"
                       style={{ backgroundColor: '#0c1a2e', borderColor: '#1e3a5f', color: '#60a5fa' }}
                     >🧊 FREEZE</button>
+
+                    {/* CHROMA KEY */}
+                    <button
+                      onClick={() => setChromaOpen(true)}
+                      className="w-full py-1.5 rounded text-[8px] font-black uppercase tracking-widest border transition-all active:scale-[0.97]"
+                      style={{
+                        backgroundColor: chromaActive ? '#14532d' : '#052e16',
+                        borderColor: chromaActive ? '#4ade80' : '#166534',
+                        color: '#4ade80',
+                        boxShadow: chromaActive ? '0 0 10px rgba(74,222,128,0.35)' : '0 0 6px rgba(74,222,128,0.15)'
+                      }}
+                    >{chromaActive ? '🟩 CROMA ON' : '🟩 CROMA KEY'}</button>
                   </div>
                 </div>
                 </div>
@@ -4522,7 +4703,17 @@ function PlayoutPage() {
                       {dskActive ? "ON AIR" : "OFF"}
                     </span>
                   </div>
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 items-stretch">
+                    {/* Miniatura do PNG carregado — confirmação visual do que foi carregado */}
+                    {dskPng && (
+                      <div
+                        className="w-7 h-7 rounded border shrink-0 overflow-hidden flex items-center justify-center"
+                        style={{ backgroundColor: "#0a0a0a", borderColor: "#16a34a50" }}
+                        title="Preview do PNG carregado no DSK"
+                      >
+                        <img src={dskPng} alt="Preview DSK" className="max-w-full max-h-full object-contain" />
+                      </div>
+                    )}
                     {/* Load PNG */}
                     <button
                       onClick={() => dskFileInputRef.current?.click()}
@@ -4854,6 +5045,167 @@ function PlayoutPage() {
           )}
 
       </div>
+
+      {/* ── MODAL CROMA KEY ── */}
+      {chromaOpen && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(4px)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setChromaOpen(false); }}
+        >
+          <div className="flex flex-col rounded-2xl overflow-hidden border" style={{ width: 900, maxHeight: '90vh', backgroundColor: '#0d0d0d', borderColor: '#1e1e1e', boxShadow: '0 0 60px rgba(0,0,0,0.8)' }}>
+
+            {/* Header */}
+            <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: '#1e1e1e', backgroundColor: '#111' }}>
+              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">🟩 Croma Key</span>
+              {chromaActive && <span className="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border" style={{ backgroundColor: '#14532d', borderColor: '#4ade80', color: '#4ade80' }}>● NO AR</span>}
+              <div style={{ flex: 1 }} />
+              <button onClick={() => setChromaOpen(false)} className="text-zinc-600 hover:text-white text-lg font-bold transition-colors">✕</button>
+            </div>
+
+            <div className="flex overflow-hidden" style={{ flex: 1 }}>
+
+              {/* Preview canvas */}
+              <div className="flex flex-col flex-1 bg-black relative overflow-hidden" style={{ minHeight: 360 }}>
+                {chromaBgUrl && (
+                  <img src={chromaBgUrl} alt="bg" className="absolute inset-0 w-full h-full object-contain z-0 pointer-events-none" />
+                )}
+                <canvas
+                  ref={chromaCanvasRef}
+                  className="relative z-10 w-full h-full object-contain"
+                  style={{ maxHeight: 360 }}
+                  onClick={(e) => {
+                    const canvas = chromaCanvasRef.current;
+                    if (!canvas) return;
+                    const rect = canvas.getBoundingClientRect();
+                    const sx = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width));
+                    const sy = Math.floor((e.clientY - rect.top) * (canvas.height / rect.height));
+                    const ctx = canvas.getContext("2d");
+                    if (!ctx) return;
+                    const px = ctx.getImageData(sx, sy, 1, 1).data;
+                    const hex = '#' + [px[0], px[1], px[2]].map(v => v.toString(16).padStart(2, '0')).join('');
+                    setChromaColor({ r: px[0], g: px[1], b: px[2] });
+                    setChromaColorHex(hex);
+                    toast(`🎨 Cor coletada: ${hex}`);
+                  }}
+                  title="Clique para coletar a cor do croma"
+                />
+                {!chromaFile && (
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 text-zinc-700">
+                    <span style={{ fontSize: 32 }}>🎬</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest">Selecione um vídeo</span>
+                  </div>
+                )}
+                {/* canvas offscreen (hidden) */}
+                <canvas ref={chromaOffscreenRef} className="hidden" />
+              </div>
+
+              {/* Sidebar controles */}
+              <div className="flex flex-col overflow-y-auto border-l" style={{ width: 220, borderColor: '#1e1e1e', backgroundColor: '#111' }}>
+
+                {/* Vídeo fonte */}
+                <div className="p-3 border-b" style={{ borderColor: '#1e1e1e' }}>
+                  <div className="text-[8px] font-black uppercase tracking-widest text-zinc-600 mb-2">Vídeo Fonte</div>
+                  <div className="flex flex-col gap-1" style={{ maxHeight: 160, overflowY: 'auto' }}>
+                    {localFiles.map((f) => (
+                      <button
+                        key={f.name}
+                        onClick={() => selectChromaFile(f)}
+                        className="text-left px-2 py-1.5 rounded border text-[9px] transition-all"
+                        style={{
+                          backgroundColor: chromaFile?.name === f.name ? '#14532d40' : '#141414',
+                          borderColor: chromaFile?.name === f.name ? '#4ade80' : '#2a2a2a',
+                          color: chromaFile?.name === f.name ? '#4ade80' : '#a1a1aa',
+                          wordBreak: 'break-word', lineHeight: 1.4
+                        }}
+                      >{f.name.replace(/\.mp4$/i, '')}</button>
+                    ))}
+                  </div>
+                  <div className="flex gap-1.5 mt-2">
+                    <button onClick={() => chromaVideoRef.current?.play()} className="flex-1 py-1 rounded border text-[8px] font-black uppercase text-zinc-300 transition-all" style={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a' }}>▶ Play</button>
+                    <button onClick={() => { if (chromaVideoRef.current) { chromaVideoRef.current.pause(); chromaVideoRef.current.currentTime = 0; } }} className="flex-1 py-1 rounded border text-[8px] font-black uppercase text-zinc-300 transition-all" style={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a' }}>■ Stop</button>
+                  </div>
+                </div>
+
+                {/* Cor do croma */}
+                <div className="p-3 border-b" style={{ borderColor: '#1e1e1e' }}>
+                  <div className="text-[8px] font-black uppercase tracking-widest text-zinc-600 mb-2">Cor do Croma</div>
+                  <div className="flex gap-1.5 mb-2">
+                    {[{ label: '🟩 Verde', r: 0, g: 177, b: 64, hex: '#00b140' }, { label: '🟦 Azul', r: 0, g: 0, b: 200, hex: '#0000c8' }].map(p => (
+                      <button key={p.label} onClick={() => { setChromaColor({ r: p.r, g: p.g, b: p.b }); setChromaColorHex(p.hex); }}
+                        className="flex-1 py-1 rounded border text-[8px] font-black uppercase transition-all"
+                        style={{ backgroundColor: chromaColorHex === p.hex ? '#14532d' : '#1a1a1a', borderColor: chromaColorHex === p.hex ? '#4ade80' : '#2a2a2a', color: chromaColorHex === p.hex ? '#4ade80' : '#71717a' }}>
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={chromaColorHex} onChange={(e) => {
+                      const hex = e.target.value;
+                      setChromaColorHex(hex);
+                      setChromaColor({ r: parseInt(hex.slice(1,3),16), g: parseInt(hex.slice(3,5),16), b: parseInt(hex.slice(5,7),16) });
+                    }} className="w-8 h-8 rounded border-0 cursor-pointer" />
+                    <div>
+                      <div className="text-[8px] text-zinc-500">Ou clique no vídeo</div>
+                      <div className="text-[8px] font-mono text-zinc-400">{chromaColorHex}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ajustes */}
+                <div className="p-3 border-b" style={{ borderColor: '#1e1e1e' }}>
+                  <div className="text-[8px] font-black uppercase tracking-widest text-zinc-600 mb-2">Ajustes</div>
+                  {[
+                    { label: 'Tolerância', val: chromaTolerance, set: setChromaTolerance, min: 1, max: 255 },
+                    { label: 'Suavidade', val: chromaSpill, set: setChromaSpill, min: 0, max: 80 },
+                    { label: 'Escala %', val: chromaScale, set: setChromaScale, min: 25, max: 100, step: 25 },
+                  ].map(({ label, val, set, min, max, step }) => (
+                    <div key={label} className="mb-2">
+                      <div className="flex justify-between mb-1">
+                        <span className="text-[8px] text-zinc-500">{label}</span>
+                        <span className="text-[8px] font-mono text-zinc-400">{val}</span>
+                      </div>
+                      <input type="range" min={min} max={max} step={step ?? 1} value={val}
+                        onChange={(e) => set(Number(e.target.value))}
+                        className="w-full h-1 accent-emerald-400" />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Fundo */}
+                <div className="p-3 border-b" style={{ borderColor: '#1e1e1e' }}>
+                  <div className="text-[8px] font-black uppercase tracking-widest text-zinc-600 mb-2">Imagem de Fundo</div>
+                  <button onClick={() => chromaBgFileInputRef.current?.click()} className="w-full py-1.5 rounded border text-[8px] font-black uppercase text-zinc-300 transition-all mb-1" style={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a' }}>📁 Carregar</button>
+                  {chromaBgUrl && <button onClick={() => setChromaBgUrl(null)} className="w-full py-1 rounded border text-[8px] font-black uppercase text-red-400 transition-all" style={{ backgroundColor: '#1a1a1a', borderColor: '#7f1d1d' }}>✕ Remover</button>}
+                  <input ref={chromaBgFileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
+                    const file = e.target.files?.[0]; if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => setChromaBgUrl(ev.target?.result as string);
+                    reader.readAsDataURL(file);
+                    e.target.value = '';
+                  }} />
+                </div>
+
+                {/* Ações PGM */}
+                <div className="p-3 flex flex-col gap-2">
+                  <button
+                    onClick={sendChromaToPgm}
+                    disabled={!chromaFile}
+                    className="w-full py-2 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all active:scale-[0.97] disabled:opacity-40"
+                    style={{ backgroundColor: '#14532d', borderColor: '#4ade80', color: '#4ade80', boxShadow: '0 0 12px rgba(74,222,128,0.3)' }}
+                  >▶ ENVIAR PARA PGM</button>
+                  {chromaActive && (
+                    <button onClick={stopChromaPgm} className="w-full py-2 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all active:scale-[0.97]" style={{ backgroundColor: '#7f1d1d40', borderColor: '#991b1b', color: '#f87171' }}>
+                      ■ REMOVER DO PGM
+                    </button>
+                  )}
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style
         dangerouslySetInnerHTML={{

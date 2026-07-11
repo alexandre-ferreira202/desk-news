@@ -32,26 +32,35 @@ type OrderSpec = { col: string; asc: boolean };
 interface QueryResult<T> {
   data: T | null;
   error: { message: string } | null;
+  count?: number | null;
 }
+
+type SelectOptions = { count?: "exact" | "planned" | "estimated"; head?: boolean };
 
 class QueryBuilder<T = Row> {
   private _table: string;
   private _columns = "*";
   private _filters: FilterOp[] = [];
+  private _orFilters: FilterOp[][] = []; // each entry is an OR-group of filters, ANDed together with the rest
   private _orders: OrderSpec[] = [];
   private _limit: number | null = null;
+  private _offset: number | null = null;
   private _single = false;
   private _mode: "select" | "insert" | "update" | "delete" | "upsert" = "select";
   private _payload: Row | Row[] | null = null;
   private _onConflict: string | null = null;
+  private _countMode: SelectOptions["count"] | null = null;
+  private _head = false;
 
   constructor(table: string) {
     this._table = table;
   }
 
-  select(columns = "*"): this {
+  select(columns = "*", options?: SelectOptions): this {
     this._mode = "select";
     this._columns = columns;
+    this._countMode = options?.count ?? null;
+    this._head = options?.head ?? false;
     return this;
   }
 
@@ -98,6 +107,36 @@ class QueryBuilder<T = Row> {
   limit(n: number): this { this._limit = n; return this; }
   single(): this { this._single = true; this._limit = 1; return this; }
 
+  /** Supabase-style pagination: inclusive range of row indices. */
+  range(from: number, to: number): this {
+    this._offset = from;
+    this._limit = to - from + 1;
+    return this;
+  }
+
+  /**
+   * Supabase-style OR filter, e.g.:
+   *   .or(`retranca.ilike."%${termo}%",texto.ilike."%${termo}%"`)
+   * Each comma-separated segment is "column.operator.value"; segments are
+   * combined with OR and this whole group is ANDed with any other filters.
+   */
+  or(filterString: string): this {
+    const group: FilterOp[] = filterString.split(",").map((segment) => {
+      const match = segment.match(/^([^.]+)\.([a-zA-Z]+)\.(.+)$/);
+      if (!match) throw new Error(`[db] filtro OR inválido: "${segment}"`);
+      const [, col, rawOp, rawVal] = match;
+      const val = rawVal.replace(/^"(.*)"$/, "$1");
+      const opMap: Record<string, string> = {
+        eq: "=", neq: "!=", gt: ">", gte: ">=", lt: "<", lte: "<=",
+        like: "LIKE", ilike: "ILIKE", is: "IS",
+      };
+      const op = opMap[rawOp] ?? rawOp.toUpperCase();
+      return { col, op, val };
+    });
+    this._orFilters.push(group);
+    return this;
+  }
+
   then<R>(resolve: (value: QueryResult<T>) => R, reject?: (reason: unknown) => R): Promise<R> {
     return this._run().then(resolve, reject);
   }
@@ -105,37 +144,55 @@ class QueryBuilder<T = Row> {
   private async _run(): Promise<QueryResult<T>> {
     try {
       let rows: Row[] = [];
-      if (this._mode === "select") rows = await this._execSelect();
+      if (this._mode === "select") {
+        rows = this._head ? [] : await this._execSelect();
+      }
       else if (this._mode === "insert") rows = await this._execInsert();
       else if (this._mode === "update") rows = await this._execUpdate();
       else if (this._mode === "delete") rows = await this._execDelete();
       else if (this._mode === "upsert") rows = await this._execUpsert();
 
-      if (this._single) return { data: (rows[0] ?? null) as T, error: null };
-      return { data: rows as unknown as T, error: null };
+      let count: number | null = null;
+      if (this._mode === "select" && this._countMode) {
+        count = await this._execCount();
+      }
+
+      if (this._single) return { data: (rows[0] ?? null) as T, error: null, count };
+      return { data: rows as unknown as T, error: null, count };
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       console.error(`[db] ${this._mode} ${this._table}:`, message);
-      return { data: null, error: { message } };
+      return { data: null, error: { message }, count: null };
     }
   }
 
   private _lit(v: unknown): string {
     if (v === null || v === undefined) return "NULL";
     if (typeof v === "number" || typeof v === "boolean") return String(v);
+    if (v instanceof Date) return `'${v.toISOString()}'`;
+    if (Array.isArray(v) || (typeof v === "object")) {
+      return `'${JSON.stringify(v).replace(/'/g, "''")}'`;
+    }
     return `'${String(v).replace(/'/g, "''")}'`;
   }
 
+  private _filterSql(f: FilterOp): string {
+    if (f.op === "IN") {
+      const list = (f.val as unknown[]).map((v) => this._lit(v)).join(", ");
+      return `"${f.col}" IN (${list})`;
+    }
+    if (f.op === "IS") return `"${f.col}" IS ${f.val === null ? "NULL" : f.val ? "TRUE" : "FALSE"}`;
+    return `"${f.col}" ${f.op} ${this._lit(f.val)}`;
+  }
+
   private _whereClause(): string {
-    if (this._filters.length === 0) return "";
-    const parts = this._filters.map((f) => {
-      if (f.op === "IN") {
-        const list = (f.val as unknown[]).map((v) => this._lit(v)).join(", ");
-        return `"${f.col}" IN (${list})`;
-      }
-      if (f.op === "IS") return `"${f.col}" IS ${f.val === null ? "NULL" : f.val ? "TRUE" : "FALSE"}`;
-      return `"${f.col}" ${f.op} ${this._lit(f.val)}`;
-    });
+    const parts = this._filters.map((f) => this._filterSql(f));
+    for (const group of this._orFilters) {
+      if (group.length === 0) continue;
+      const orred = group.map((f) => this._filterSql(f)).join(" OR ");
+      parts.push(group.length > 1 ? `(${orred})` : orred);
+    }
+    if (parts.length === 0) return "";
     return "WHERE " + parts.join(" AND ");
   }
 
@@ -148,9 +205,19 @@ class QueryBuilder<T = Row> {
     return this._limit !== null ? `LIMIT ${this._limit}` : "";
   }
 
+  private _offsetClause(): string {
+    return this._offset !== null ? `OFFSET ${this._offset}` : "";
+  }
+
   private async _execSelect(): Promise<Row[]> {
-    const q = [`SELECT ${this._columns} FROM "${this._table}"`, this._whereClause(), this._orderClause(), this._limitClause()].filter(Boolean).join(" ");
+    const q = [`SELECT ${this._columns} FROM "${this._table}"`, this._whereClause(), this._orderClause(), this._limitClause(), this._offsetClause()].filter(Boolean).join(" ");
     return runQuery(q);
+  }
+
+  private async _execCount(): Promise<number> {
+    const q = [`SELECT COUNT(*)::int AS count FROM "${this._table}"`, this._whereClause()].filter(Boolean).join(" ");
+    const rows = await runQuery(q);
+    return (rows[0]?.count as number) ?? 0;
   }
 
   private async _execInsert(): Promise<Row[]> {
